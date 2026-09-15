@@ -1,0 +1,20 @@
+# зависимости — Vercel скачает их сам
+/node_modules
+
+# сборка
+/.next
+/out
+/build
+next-env.d.ts
+
+# настройки окружения с реальными ключами — НИКОГДА не заливать
+.env
+.env.production
+.env*.local.real
+
+# системный мусор
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+.vercel
