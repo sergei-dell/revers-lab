@@ -5,7 +5,6 @@ import {
   IconAlert,
   IconBolt,
   IconFilm,
-  IconLink,
   IconSpark,
   IconSplit,
   IconUpload,
@@ -19,7 +18,7 @@ const STEPS = [
   {
     n: "01",
     title: "Захват",
-    text: "Файл открывается в браузере, декодер видео остаётся локальным — на сервер ничего не уходит.",
+    text: "Файл открывается в браузере, декодер видео остаётся локальным — никуда ничего не уходит.",
     icon: <IconUpload width={15} height={15} />,
   },
   {
@@ -44,16 +43,13 @@ const STEPS = [
 
 export function Dropzone({
   onFile,
-  onUrl,
   busy,
 }: {
   onFile: (file: File) => void;
-  onUrl: (url: string) => void;
   busy: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [drag, setDrag] = useState(false);
-  const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const validateAndSend = (file: File) => {
@@ -78,27 +74,6 @@ export function Dropzone({
       return;
     }
     onFile(file);
-  };
-
-  const submitUrl = () => {
-    setError(null);
-    const trimmed = url.trim();
-    if (!trimmed) {
-      setError("Вставьте прямую ссылку на видеофайл.");
-      return;
-    }
-    let parsed: URL;
-    try {
-      parsed = new URL(trimmed);
-    } catch {
-      setError("Это не похоже на корректный URL.");
-      return;
-    }
-    if (!["http:", "https:"].includes(parsed.protocol)) {
-      setError("Разрешены только http и https ссылки.");
-      return;
-    }
-    onUrl(trimmed);
   };
 
   return (
@@ -131,7 +106,7 @@ export function Dropzone({
 
           <div className="relative">
             <span className="chip border-ember/40 text-ember">
-              <IconBolt width={12} height={12} /> локальный анализ · без загрузки на сервер
+              <IconBolt width={12} height={12} /> локальный анализ · файл не покидает браузер
             </span>
             <h2 className="mt-4 max-w-[16ch] font-display text-[clamp(1.9rem,3.6vw,2.9rem)] font-bold leading-[0.98] tracking-[-0.02em] text-chalk">
               Разберите видео
@@ -178,30 +153,6 @@ export function Dropzone({
               />
             </div>
 
-            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-              <div className="relative flex-1">
-                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-dim">
-                  <IconLink width={15} height={15} />
-                </span>
-                <input
-                  className="field pl-9 font-mono text-[12px]"
-                  placeholder="…или ссылка на видео: https://example.com/clip.mp4"
-                  value={url}
-                  disabled={busy}
-                  onChange={(e) => {
-                    setUrl(e.target.value);
-                    if (error) setError(null);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") submitUrl();
-                  }}
-                />
-              </div>
-              <button type="button" className="btn" disabled={busy} onClick={submitUrl}>
-                Загрузить по ссылке
-              </button>
-            </div>
-
             {error ? (
               <div className="animate-rise mt-3 flex items-start gap-2.5 rounded-lg border border-bad/40 bg-bad/8 px-3 py-2.5">
                 <span className="mt-0.5 text-bad">
@@ -240,11 +191,11 @@ export function Dropzone({
           </ol>
           <div className="mt-2 rounded-xl border border-line-soft bg-void/60 p-3.5">
             <p className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-dim">
-              Что попадает в базу
+              Что сохраняется в историю
             </p>
             <p className="mt-1.5 text-[12.5px] leading-relaxed text-muted">
-              Только метаданные, метрики, палитра, промпт и миниатюра 320 px. Сам файл и
-              полноразмерные кадры остаются у вас в браузере.
+              Только метаданные, метрики, палитра, промпт и миниатюра 320 px — в памяти
+              этого браузера. Сам файл и полноразмерные кадры не сохраняются нигде.
             </p>
           </div>
         </div>

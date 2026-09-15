@@ -12,7 +12,7 @@ import { Dropzone } from "@/components/Dropzone";
 import { FrameBoard, type ExtractMode } from "@/components/FrameBoard";
 import { HistoryPanel } from "@/components/HistoryPanel";
 import { MetricsPanel } from "@/components/MetricsPanel";
-import { PromptPanel, type EnrichState, type SaveState } from "@/components/PromptPanel";
+import { PromptPanel, type SaveState } from "@/components/PromptPanel";
 import { VideoStage, type ClipRange } from "@/components/VideoStage";
 import {
   IconAlert,
@@ -34,6 +34,7 @@ import {
   uid,
 } from "@/lib/format";
 import { buildPrompt, metricReadouts, type StylePreset } from "@/lib/prompt";
+import { readHistory, writeHistory } from "@/lib/localHistory";
 import { analysisFromRow, toStoredMetrics } from "@/lib/store";
 import type {
   Analysis,
@@ -69,7 +70,7 @@ const TABS: Array<{ id: Tab; label: string; icon: ReactNode }> = [
   { id: "history", label: "История", icon: <IconHistory width={14} height={14} /> },
 ];
 
-export function Workspace({ dbOnline }: { dbOnline: boolean }) {
+export function Workspace() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const objectUrlRef = useRef<string | null>(null);
   const thumbRef = useRef<string | null>(null);
@@ -111,10 +112,6 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
   const [dirty, setDirty] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [savedId, setSavedId] = useState<string | null>(null);
-
-  const [enrichState, setEnrichState] = useState<EnrichState>("idle");
-  const [enrichResult, setEnrichResult] = useState<{ ru: string; en: string; tags: string[] } | null>(null);
-  const [enrichError, setEnrichError] = useState<string | null>(null);
 
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -159,10 +156,7 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
     setHistoryLoading(true);
     setHistoryError(null);
     try {
-      const res = await fetch("/api/analyses?limit=30", { cache: "no-store" });
-      const data = (await res.json()) as { items?: HistoryItem[]; error?: string };
-      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
-      setHistory(data.items ?? []);
+      setHistory(readHistory());
     } catch (e) {
       setHistoryError(e instanceof Error ? e.message : "Не удалось получить историю");
     } finally {
@@ -257,9 +251,6 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
       setDirty(false);
       setSaveState("idle");
       setSavedId(null);
-      setEnrichState("idle");
-      setEnrichResult(null);
-      setEnrichError(null);
       setClip({ a: null, b: null });
       setFatal(null);
       setTab("prompt");
@@ -280,41 +271,6 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
       });
     },
     [startFromSource],
-  );
-
-  const handleUrl = useCallback(
-    async (raw: string) => {
-      setPhase("decoding");
-      setProgress({ done: 0, total: 1, label: "скачиваем видео через серверный прокси…" });
-      setFatal(null);
-      try {
-        const res = await fetch(`/api/proxy?url=${encodeURIComponent(raw)}`);
-        const type = res.headers.get("content-type") ?? "video/mp4";
-        if (!res.ok) {
-          const data = (await res.json().catch(() => ({}))) as { error?: string };
-          throw new Error(data.error ?? `Источник ответил ${res.status}`);
-        }
-        const blob = await res.blob();
-        if (!blob.size) throw new Error("Источник вернул пустой файл");
-        const guess = decodeURIComponent(raw.split("/").pop()?.split("?")[0] ?? "") || "clip.mp4";
-        const url = URL.createObjectURL(blob);
-        startFromSource(url, {
-          name: guess,
-          size: blob.size,
-          mime: type,
-          source: "url",
-        });
-      } catch (e) {
-        setPhase("idle");
-        setProgress(null);
-        setFatal({
-          title: "Не удалось загрузить видео по ссылке",
-          detail: e instanceof Error ? e.message : "Неизвестная ошибка сети",
-        });
-        pushToast("error", "Ссылка не открылась", e instanceof Error ? e.message : undefined);
-      }
-    },
-    [pushToast, startFromSource],
   );
 
   useEffect(() => {
@@ -609,69 +565,6 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
     pushToast("success", "Отчёт выгружен");
   }, [analysis, bundle, draftEn, draftRu, meta, pushToast]);
 
-  const enrich = useCallback(async () => {
-    if (!analysis || !bundle) return;
-    setEnrichState("loading");
-    setEnrichError(null);
-    try {
-      const frames: string[] = [];
-      const v = videoRef.current;
-      if (v && sourceUrl && meta) {
-        const times = (analysis.scenes.length ? sceneTimes(analysis.scenes) : evenTimes(meta.durationSec, 3)).slice(0, 3);
-        v.pause();
-        for (const t of times) {
-          const shot = await grabFrame(v, t, "image/jpeg", 0.78, 512);
-          frames.push(await blobToDataUrl(shot.blob));
-          URL.revokeObjectURL(shot.url);
-        }
-        v.currentTime = currentTime;
-      } else if (shots.length) {
-        for (const s of shots.slice(0, 3)) frames.push(await blobToDataUrl(s.blob));
-      } else if (thumbRef.current) {
-        frames.push(thumbRef.current);
-      }
-      if (!frames.length) throw new Error("Нет ни одного кадра для отправки модели");
-
-      const res = await fetch("/api/enrich", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          frames,
-          tags,
-          summary: JSON.stringify(bundle.structured, null, 2),
-        }),
-      });
-      const data = (await res.json()) as { ru?: string; en?: string; tags?: string[]; error?: string };
-      if (!res.ok) throw new Error(data.error ?? `Модель ответила ${res.status}`);
-      if (!data.ru && !data.en) throw new Error("Пустой ответ модели");
-      setEnrichResult({ ru: data.ru ?? "", en: data.en ?? "", tags: data.tags ?? [] });
-      setEnrichState("done");
-      pushToast("success", "Модель описала кадры");
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Неизвестная ошибка";
-      setEnrichError(msg);
-      setEnrichState("error");
-    }
-  }, [analysis, bundle, currentTime, meta, pushToast, shots, sourceUrl, tags]);
-
-  const applyEnrich = useCallback(() => {
-    if (!enrichResult || !bundle) return;
-    const merged = (local: string, ai: string) =>
-      ai.trim() ? `${ai.trim()}\n\n— технические измерения:\n${local}` : local;
-    setDraftRu(merged(bundle.ru, enrichResult.ru));
-    setDraftEn(merged(bundle.en, enrichResult.en));
-    setDirty(true);
-    setLang("ru");
-    setView("prompt");
-    if (enrichResult.tags.length) {
-      setTags((prev) => {
-        const extra = enrichResult.tags.join(", ");
-        return prev.trim() ? `${prev.replace(/[,;]\s*$/, "")}, ${extra}` : extra;
-      });
-    }
-    pushToast("success", "Ответ модели подставлен в промпт");
-  }, [bundle, enrichResult, pushToast]);
-
   const save = useCallback(async () => {
     if (!meta || !bundle || !analysis) return;
     setSaveState("saving");
@@ -680,41 +573,45 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
         tags.trim().split(/[,;]/)[0].trim().slice(0, 70) ||
         meta.fileName.replace(/\.[^.]+$/, "").slice(0, 70) ||
         "Клип";
-      const res = await fetch("/api/analyses", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title,
-          fileName: meta.fileName,
-          source: meta.source,
-          durationSec: meta.durationSec,
-          width: meta.width,
-          height: meta.height,
-          fps: meta.fps,
-          sizeBytes: meta.sizeBytes,
-          subjectTags: tags,
-          promptRu: draftRu || bundle.ru,
-          promptEn: draftEn || bundle.en,
-          negativePrompt: bundle.negative,
-          structured: bundle.structured,
-          metrics: toStoredMetrics(analysis),
-          palette: analysis.palette,
-          scenes: analysis.scenes,
-          frameCount: shots.length,
-          thumb: thumbRef.current,
-        }),
-      });
-      const data = (await res.json()) as { item?: HistoryItem; error?: string; detail?: string };
-      if (!res.ok) throw new Error(data.error ?? data.detail ?? `HTTP ${res.status}`);
+      const item: HistoryItem = {
+        id: uid("h"),
+        title,
+        fileName: meta.fileName,
+        source: meta.source,
+        durationSec: meta.durationSec.toFixed(3),
+        width: meta.width,
+        height: meta.height,
+        fps: meta.fps.toFixed(2),
+        sizeBytes: meta.sizeBytes,
+        subjectTags: tags,
+        promptRu: draftRu || bundle.ru,
+        promptEn: draftEn || bundle.en,
+        negativePrompt: bundle.negative,
+        structured: bundle.structured,
+        metrics: toStoredMetrics(analysis),
+        palette: analysis.palette,
+        scenes: analysis.scenes,
+        frameCount: shots.length,
+        thumb: thumbRef.current,
+        createdAt: new Date().toISOString(),
+      };
+      const { saved, dropped } = writeHistory([item, ...readHistory()]);
+      setHistory(saved);
+      setHistoryError(null);
       setSaveState("saved");
-      setSavedId(data.item?.id ?? null);
-      pushToast("success", "Сохранено в PostgreSQL", `Запись ${data.item?.id.slice(0, 8) ?? ""}`);
-      void refreshHistory();
+      setSavedId(item.id);
+      pushToast(
+        "success",
+        "Сохранено в историю",
+        dropped
+          ? `Память браузера заполнена — удалено старых записей: ${dropped}`
+          : "Запись хранится в этом браузере",
+      );
     } catch (e) {
       setSaveState("error");
       pushToast("error", "Не удалось сохранить", e instanceof Error ? e.message : undefined);
     }
-  }, [analysis, bundle, draftEn, draftRu, meta, pushToast, refreshHistory, shots.length, tags]);
+  }, [analysis, bundle, draftEn, draftRu, meta, pushToast, shots.length, tags]);
 
   const openHistoryItem = useCallback((item: HistoryItem) => {
     const a = analysisFromRow(item);
@@ -758,26 +655,20 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
   }, [shots]);
 
   const deleteHistoryItem = useCallback(
-    async (id: string) => {
-      const previous = history;
-      setHistory((prev) => prev.filter((h) => h.id !== id));
+    (id: string) => {
       try {
-        const res = await fetch(`/api/analyses/${id}`, { method: "DELETE" });
-        if (!res.ok) {
-          const data = (await res.json().catch(() => ({}))) as { error?: string };
-          throw new Error(data.error ?? `HTTP ${res.status}`);
-        }
+        const { saved } = writeHistory(readHistory().filter((h) => h.id !== id));
+        setHistory(saved);
         if (savedId === id) {
           setSavedId(null);
           setSaveState("idle");
         }
         pushToast("success", "Запись удалена");
       } catch (e) {
-        setHistory(previous);
         pushToast("error", "Удаление не удалось", e instanceof Error ? e.message : undefined);
       }
     },
-    [history, pushToast, savedId],
+    [pushToast, savedId],
   );
 
   const resetAll = useCallback(() => {
@@ -805,8 +696,6 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
     setDraftEn("");
     setSaveState("idle");
     setSavedId(null);
-    setEnrichState("idle");
-    setEnrichResult(null);
     setClip({ a: null, b: null });
     setCurrentTime(0);
   }, [shots]);
@@ -859,7 +748,7 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
               </div>
             </div>
           ) : null}
-          <Dropzone onFile={handleFile} onUrl={(u) => void handleUrl(u)} busy={busy} />
+          <Dropzone onFile={handleFile} busy={busy} />
         </>
       ) : null}
 
@@ -990,7 +879,7 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
                 );
               })}
               <span className="ml-auto hidden pr-2 font-mono text-[10px] uppercase tracking-[0.12em] text-dim lg:block">
-                {saveState === "saved" ? `в базе${savedId ? ` · ${savedId.slice(0, 8)}` : ""}` : "черновик"}
+                {saveState === "saved" ? "в истории" : "черновик"}
               </span>
             </div>
 
@@ -1016,16 +905,6 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
                     }
                   }}
                   onDownload={downloadPrompt}
-                  enrichState={enrichState}
-                  enrichResult={enrichResult}
-                  enrichError={enrichError}
-                  onEnrich={() => void enrich()}
-                  onApplyEnrich={applyEnrich}
-                  onDismissEnrich={() => {
-                    setEnrichState("idle");
-                    setEnrichResult(null);
-                    setEnrichError(null);
-                  }}
                   saveState={saveState}
                   onSave={() => void save()}
                 />
@@ -1086,10 +965,9 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
                   items={history}
                   loading={historyLoading}
                   error={historyError}
-                  dbOnline={dbOnline}
                   onRefresh={() => void refreshHistory()}
                   onLoad={openHistoryItem}
-                  onDelete={(id) => void deleteHistoryItem(id)}
+                  onDelete={deleteHistoryItem}
                 />
               ) : null}
             </div>
@@ -1172,7 +1050,7 @@ function RestoredCard({
             {formatBytes(meta.sizeBytes)} · {item?.frameCount ?? 0} кадров в сессии
           </p>
           <p className="mt-2 rounded-lg border border-line-soft bg-void/50 px-3 py-2 text-[12.5px] leading-relaxed text-muted">
-            Видеофайл не загружен — из базы восстановлены метрики, палитра, планы и промпт.
+            Видеофайл не загружен — из истории восстановлены метрики, палитра, планы и промпт.
             Чтобы снять новые кадры, откройте исходник заново.
           </p>
         </div>

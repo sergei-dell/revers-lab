@@ -23,7 +23,7 @@ if [ ! -d "node_modules" ]; then
 fi
 
 echo
-echo "Сайт запускается. Открой в браузере:  http://localhost:3000"
+echo "Сайт запускается. Открой в браузере:  http://localhost:3000/revers-lab"
 echo "Чтобы выключить - закрой это окно."
 echo
 npm run dev

@@ -20,7 +20,6 @@ export function HistoryPanel({
   items,
   loading,
   error,
-  dbOnline,
   onRefresh,
   onLoad,
   onDelete,
@@ -28,7 +27,6 @@ export function HistoryPanel({
   items: HistoryItem[];
   loading: boolean;
   error: string | null;
-  dbOnline: boolean;
   onRefresh: () => void;
   onLoad: (item: HistoryItem) => void;
   onDelete: (id: string) => void;
@@ -40,11 +38,9 @@ export function HistoryPanel({
           <IconHistory width={12} height={12} />
           {items.length} записей
         </span>
-        <span
-          className={`chip ${dbOnline ? "border-good/35 text-good" : "border-bad/40 text-bad"}`}
-        >
-          <span className={`h-1.5 w-1.5 rounded-full ${dbOnline ? "bg-good" : "bg-bad"}`} />
-          {dbOnline ? "PostgreSQL на связи" : "база недоступна"}
+        <span className="chip" title="История хранится только в этом браузере на этом устройстве">
+          <span className="h-1.5 w-1.5 rounded-full bg-good" />
+          в этом браузере
         </span>
         <button
           type="button"
@@ -81,7 +77,8 @@ export function HistoryPanel({
       {!loading && !items.length && !error ? (
         <EmptyNote>
           История пуста. Как только вы проанализируете видео и нажмёте «В историю», запись
-          с метриками, палитрой, промптом и миниатюрой ляжет в PostgreSQL.
+          с метриками, палитрой, промптом и миниатюрой сохранится в памяти этого браузера.
+          На другом устройстве или в другом браузере её не будет.
         </EmptyNote>
       ) : null}
 

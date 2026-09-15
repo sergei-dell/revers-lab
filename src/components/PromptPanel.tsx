@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import {
-  IconBolt,
   IconCheck,
   IconCopy,
   IconDownload,
@@ -14,7 +13,6 @@ import { STYLE_PRESETS, type StylePreset } from "@/lib/prompt";
 import type { PromptBundle } from "@/lib/types";
 
 type View = "prompt" | "json" | "negative";
-export type EnrichState = "idle" | "loading" | "done" | "error";
 export type SaveState = "idle" | "saving" | "saved" | "error";
 
 export function PromptPanel({
@@ -31,12 +29,6 @@ export function PromptPanel({
   onDraftChange,
   onResetDraft,
   onDownload,
-  enrichState,
-  enrichResult,
-  enrichError,
-  onEnrich,
-  onApplyEnrich,
-  onDismissEnrich,
   saveState,
   onSave,
 }: {
@@ -53,12 +45,6 @@ export function PromptPanel({
   onDraftChange: (value: string) => void;
   onResetDraft: () => void;
   onDownload: (kind: "txt" | "json") => void;
-  enrichState: EnrichState;
-  enrichResult: { ru: string; en: string; tags: string[] } | null;
-  enrichError: string | null;
-  onEnrich: () => void;
-  onApplyEnrich: () => void;
-  onDismissEnrich: () => void;
   saveState: SaveState;
   onSave: () => void;
 }) {
@@ -231,7 +217,7 @@ export function PromptPanel({
             </>
           ) : saveState === "saved" ? (
             <>
-              <IconCheck width={15} height={15} />В базе
+              <IconCheck width={15} height={15} />В истории
             </>
           ) : saveState === "error" ? (
             <>Повторить сохранение</>
@@ -249,85 +235,6 @@ export function PromptPanel({
         </p>
       ) : null}
 
-      {/* ---------- AI enrichment ---------- */}
-      <div className="panel-flat p-3.5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span className="text-flare">
-              <IconBolt width={15} height={15} />
-            </span>
-            <p className="font-display text-[12.5px] font-bold uppercase tracking-[0.09em] text-chalk">
-              Усиление нейросетью
-            </p>
-          </div>
-          <button
-            type="button"
-            className="btn px-3 py-1.5 text-[12px]"
-            onClick={onEnrich}
-            disabled={enrichState === "loading"}
-          >
-            {enrichState === "loading" ? "Модель думает…" : "Описать кадры моделью"}
-          </button>
-        </div>
-
-        <p className="mt-2 text-[12px] leading-relaxed text-muted">
-          Локальный движок измеряет физику кадра. Если на сервере задан{" "}
-          <code className="rounded bg-void px-1 py-0.5 font-mono text-[11px] text-ice">
-            OPENAI_API_KEY
-          </code>
-          , три ключевых кадра дополнительно уходят в vision-модель — она называет объекты
-          и действие.
-        </p>
-
-        {enrichState === "error" && enrichError ? (
-          <div className="animate-rise mt-3 rounded-lg border border-warn/40 bg-warn/8 px-3 py-2.5">
-            <p className="text-[12.5px] leading-snug text-chalk/90">{enrichError}</p>
-            <button
-              type="button"
-              className="btn btn-ghost mt-1.5 px-2 py-1 text-[11.5px]"
-              onClick={onDismissEnrich}
-            >
-              Понятно, остаться на локальном анализе
-            </button>
-          </div>
-        ) : null}
-
-        {enrichState === "done" && enrichResult ? (
-          <div className="animate-rise mt-3 space-y-2.5">
-            <div className="rounded-lg border border-good/35 bg-good/6 p-3">
-              <p className="hud-label mb-1 text-good/80">Ответ модели · RU</p>
-              <p className="text-[12.5px] leading-relaxed text-chalk">{enrichResult.ru}</p>
-              <p className="hud-label mb-1 mt-2.5 text-good/80">EN</p>
-              <p className="text-[12.5px] leading-relaxed text-chalk/85">{enrichResult.en}</p>
-              {enrichResult.tags.length ? (
-                <div className="mt-2.5 flex flex-wrap gap-1.5">
-                  {enrichResult.tags.map((t) => (
-                    <span key={t} className="chip border-good/30 text-good/90">
-                      {t}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button type="button" className="btn btn-primary" onClick={onApplyEnrich}>
-                <IconCheck width={15} height={15} />
-                Подставить в промпт
-              </button>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => copy(enrichResult.en, "ai-en")}
-              >
-                {copied === "ai-en" ? "Скопировано" : "Копировать EN"}
-              </button>
-              <button type="button" className="btn btn-ghost" onClick={onDismissEnrich}>
-                Отклонить
-              </button>
-            </div>
-          </div>
-        ) : null}
-      </div>
     </div>
   );
 }

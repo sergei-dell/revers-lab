@@ -24,7 +24,7 @@ if not exist "node_modules" (
 )
 
 echo.
-echo Сайт запускается. Открой в браузере:  http://localhost:3000
+echo Сайт запускается. Открой в браузере:  http://localhost:3000/revers-lab
 echo Чтобы выключить - закрой это окно.
 echo.
 call npm run dev
