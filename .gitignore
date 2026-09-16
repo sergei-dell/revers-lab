@@ -21,3 +21,4 @@ npm-debug.log*
 
 # служебный файл проверки типов
 *.tsbuildinfo
+.env.local
