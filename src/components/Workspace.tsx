@@ -12,7 +12,7 @@ import { Dropzone } from "@/components/Dropzone";
 import { FrameBoard, type ExtractMode } from "@/components/FrameBoard";
 import { HistoryPanel } from "@/components/HistoryPanel";
 import { MetricsPanel } from "@/components/MetricsPanel";
-import { PromptPanel, type EnrichState, type SaveState } from "@/components/PromptPanel";
+import { PromptPanel, type EnrichAnswer, type EnrichState, type SaveState } from "@/components/PromptPanel";
 import { VideoStage, type ClipRange } from "@/components/VideoStage";
 import {
   IconAlert,
@@ -113,7 +113,7 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
   const [savedId, setSavedId] = useState<string | null>(null);
 
   const [enrichState, setEnrichState] = useState<EnrichState>("idle");
-  const [enrichResult, setEnrichResult] = useState<{ ru: string; en: string; tags: string[] } | null>(null);
+  const [enrichResult, setEnrichResult] = useState<EnrichAnswer | null>(null);
   const [enrichError, setEnrichError] = useState<string | null>(null);
 
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -614,19 +614,26 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
     setEnrichState("loading");
     setEnrichError(null);
     try {
+      // Модели нужен ход ролика, а не одна картинка: берём восемь кадров
+      // по сценам, а если сцен мало — равномерно по таймлайну.
+      const WANT_FRAMES = 8;
       const frames: string[] = [];
       const v = videoRef.current;
       if (v && sourceUrl && meta) {
-        const times = (analysis.scenes.length ? sceneTimes(analysis.scenes) : evenTimes(meta.durationSec, 3)).slice(0, 3);
+        const byScenes = sceneTimes(analysis.scenes);
+        const times = (byScenes.length >= 6 ? byScenes : evenTimes(meta.durationSec, WANT_FRAMES)).slice(
+          0,
+          WANT_FRAMES,
+        );
         v.pause();
         for (const t of times) {
-          const shot = await grabFrame(v, t, "image/jpeg", 0.78, 512);
+          const shot = await grabFrame(v, t, "image/jpeg", 0.72, 640);
           frames.push(await blobToDataUrl(shot.blob));
           URL.revokeObjectURL(shot.url);
         }
         v.currentTime = currentTime;
       } else if (shots.length) {
-        for (const s of shots.slice(0, 3)) frames.push(await blobToDataUrl(s.blob));
+        for (const s of shots.slice(0, WANT_FRAMES)) frames.push(await blobToDataUrl(s.blob));
       } else if (thumbRef.current) {
         frames.push(thumbRef.current);
       }
@@ -639,12 +646,20 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
           frames,
           tags,
           summary: JSON.stringify(bundle.structured, null, 2),
+          metrics: toStoredMetrics(analysis),
         }),
       });
-      const data = (await res.json()) as { ru?: string; en?: string; tags?: string[]; error?: string };
-      if (!res.ok) throw new Error(data.error ?? `Модель ответила ${res.status}`);
+      const data = (await res.json()) as EnrichAnswer & { error?: string };
+      if (!res.ok) throw new Error(data.error ?? `Сервис описания ответил ${res.status}`);
       if (!data.ru && !data.en) throw new Error("Пустой ответ модели");
-      setEnrichResult({ ru: data.ru ?? "", en: data.en ?? "", tags: data.tags ?? [] });
+      setEnrichResult({
+        ru: data.ru ?? "",
+        en: data.en ?? "",
+        tags: data.tags ?? [],
+        replacements: data.replacements ?? [],
+        negative: data.negative ?? "",
+        action: data.action ?? [],
+      });
       setEnrichState("done");
       pushToast("success", "Модель описала кадры");
     } catch (e) {

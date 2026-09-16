@@ -35,7 +35,22 @@ DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/app_db
 | Возможность | Что нужно |
 |---|---|
 | История разборов | настоящий PostgreSQL в `DATABASE_URL` |
-| AI-описание сцены | ключ `OPENAI_API_KEY` |
+| AI-описание сцены | ключ `POLLINATIONS_API_KEY` |
+
+### AI-описание сцены
+
+Идёт через Pollinations (`https://gen.pollinations.ai`, формат OpenAI chat
+completions). В `.env.local` добавить:
+
+```
+POLLINATIONS_API_KEY=ключ с enter.pollinations.ai/keys
+POLLINATIONS_MODEL=openai/gpt-5.4-mini
+```
+
+`POLLINATIONS_MODEL` необязателен: без него берётся `openai/gpt-5.4-mini` —
+vision-модель из списка `GET /models`, принимает до 10 картинок и умеет
+`response_format`. Ключ читается только на сервере и в браузер не уходит.
+Без ключа маршрут отвечает 501, локальный анализ работает как обычно.
 
 ## Стек
 

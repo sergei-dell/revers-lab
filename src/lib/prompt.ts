@@ -1,7 +1,7 @@
 import { CAMERA_LABELS } from "@/lib/video/analyze";
 import type { Analysis, PromptBundle, VideoMeta } from "@/lib/types";
 
-export type StylePreset = "cinema" | "commercial" | "anime" | "doc" | "vhs" | "none";
+export type StylePreset = "cinema" | "commercial" | "anime" | "doc" | "vhs" | "seedance" | "none";
 
 export const STYLE_PRESETS: Array<{
   id: StylePreset;
@@ -44,6 +44,13 @@ export const STYLE_PRESETS: Array<{
     hint: "трекинг-шум, хроматика",
     ru: "VHS-эстетика 90-х, хроматические аберрации, трекинг-шум, выцветшая плёнка",
     en: "1990s VHS aesthetic, chromatic aberration, tracking noise, faded tape",
+  },
+  {
+    id: "seedance",
+    label: "Seedance 2.5",
+    hint: "формат Seedance: живая камера и флаги --ar/--duration",
+    ru: "видеоролик Seedance 2.5, живая операторская камера, плавное естественное движение, чистая кинематографичная картинка",
+    en: "Seedance 2.5 video, live-action handheld-to-smooth camera work, natural motion, clean cinematic image",
   },
   {
     id: "none",
@@ -203,6 +210,10 @@ export function buildPrompt(input: {
       ? { ru: `${a.scenes.length} отдельных плана с жёсткими склейками`, en: `${a.scenes.length} distinct shots with hard cuts` }
       : { ru: "один непрерывный дубль", en: "one continuous take" };
   const ar = /^\d+(\.\d+)?:\d+$/.test(meta.aspect) ? `--ar ${meta.aspect}` : "--ar 16:9";
+  /*  Seedance 2.5 принимает длительность отдельным флагом и целыми
+      секундами: берём длину ролика и держим её в разумных границах.  */
+  const seedanceDuration = Math.max(3, Math.min(12, Math.round(meta.durationSec || 5)));
+  const flags = style.id === "seedance" ? `${ar} --duration ${seedanceDuration}` : ar;
 
   const tech = {
     ru: `${meta.width}×${meta.height} (${meta.aspect}), ${meta.durationSec.toFixed(1)} с, ${meta.fps} к/с`,
@@ -217,7 +228,7 @@ export function buildPrompt(input: {
     `Движение: ${motion.ru}.`,
     `Монтаж: ${shotWord.ru}.`,
     `Настроение: ${mood.ru}.`,
-    `Технические параметры: ${tech.ru}.`,
+    `Технические параметры: ${tech.ru}. ${flags}`,
   ];
   const enParts = [
     `${style.en ? `${style.en}. ` : ""}${subject.en}.`,
@@ -227,7 +238,7 @@ export function buildPrompt(input: {
     `Motion: ${motion.en}.`,
     `Editing: ${shotWord.en}.`,
     `Mood: ${mood.en}.`,
-    `Technical: ${tech.en}. ${ar}`,
+    `Technical: ${tech.en}. ${flags}`,
   ];
 
   const tagSet = new Set<string>([
@@ -256,6 +267,7 @@ export function buildPrompt(input: {
       duration_sec: Number(meta.durationSec.toFixed(3)),
       fps: meta.fps,
       source_file: meta.fileName,
+      flags,
     },
     lighting: {
       key: a.exposure,

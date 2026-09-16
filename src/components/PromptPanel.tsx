@@ -15,6 +15,16 @@ import type { PromptBundle } from "@/lib/types";
 
 type View = "prompt" | "json" | "negative";
 export type EnrichState = "idle" | "loading" | "done" | "error";
+
+// Что возвращает /api/enrich: готовый промпт, теги и разбор по частям.
+export type EnrichAnswer = {
+  ru: string;
+  en: string;
+  tags: string[];
+  replacements: Array<{ from: string; to: string }>;
+  negative: string;
+  action: Array<{ t: string; beat: string }>;
+};
 export type SaveState = "idle" | "saving" | "saved" | "error";
 
 export function PromptPanel({
@@ -54,7 +64,7 @@ export function PromptPanel({
   onResetDraft: () => void;
   onDownload: (kind: "txt" | "json") => void;
   enrichState: EnrichState;
-  enrichResult: { ru: string; en: string; tags: string[] } | null;
+  enrichResult: EnrichAnswer | null;
   enrichError: string | null;
   onEnrich: () => void;
   onApplyEnrich: () => void;
@@ -273,10 +283,11 @@ export function PromptPanel({
         <p className="mt-2 text-[12px] leading-relaxed text-muted">
           Локальный движок измеряет физику кадра. Если на сервере задан{" "}
           <code className="rounded bg-void px-1 py-0.5 font-mono text-[11px] text-ice">
-            OPENAI_API_KEY
+            POLLINATIONS_API_KEY
           </code>
-          , три ключевых кадра дополнительно уходят в vision-модель — она называет объекты
-          и действие.
+          , восемь ключевых кадров и метрики уходят в vision-модель — она называет объекты,
+          среду и действие по секундам. Бренды, франшизы, персонажей и реальных людей модель
+          заменяет архетипами и показывает список замен.
         </p>
 
         {enrichState === "error" && enrichError ? (
@@ -309,6 +320,47 @@ export function PromptPanel({
                 </div>
               ) : null}
             </div>
+
+            {enrichResult.action.length ? (
+              <div className="rounded-lg border border-line-soft bg-void/50 p-3">
+                <p className="hud-label mb-1.5">Действие по секундам</p>
+                <ul className="space-y-1">
+                  {enrichResult.action.map((b, i) => (
+                    <li key={`${b.t}-${i}`} className="flex gap-2 text-[12px] leading-snug text-muted">
+                      <span className="shrink-0 font-mono text-[11px] text-ice">{b.t || "—"}</span>
+                      <span className="text-chalk/85">{b.beat}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {enrichResult.replacements.length ? (
+              <div className="rounded-lg border border-warn/35 bg-warn/6 p-3">
+                <p className="hud-label mb-1.5 text-warn/90">Заменено архетипами</p>
+                <ul className="space-y-1">
+                  {enrichResult.replacements.map((r, i) => (
+                    <li key={`${r.from}-${i}`} className="text-[12px] leading-snug text-muted">
+                      <span className="text-chalk/90">{r.from}</span> → {r.to}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {enrichResult.negative ? (
+              <div className="rounded-lg border border-line-soft bg-void/50 p-3">
+                <p className="hud-label mb-1.5">Негативный промпт от модели</p>
+                <p className="font-mono text-[11.5px] leading-relaxed text-muted">{enrichResult.negative}</p>
+                <button
+                  type="button"
+                  className="btn btn-ghost mt-2 px-2 py-1 text-[11.5px]"
+                  onClick={() => copy(enrichResult.negative, "ai-neg")}
+                >
+                  {copied === "ai-neg" ? "Скопировано" : "Копировать негатив"}
+                </button>
+              </div>
+            ) : null}
             <div className="flex flex-wrap gap-2">
               <button type="button" className="btn btn-primary" onClick={onApplyEnrich}>
                 <IconCheck width={15} height={15} />
