@@ -1,5 +1,8 @@
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+
+import { readServerKey } from "@/lib/serverKey";
 
 // Описание сцены по кадрам. Считает не наш код, а vision-модель через
 // Pollinations (формат OpenAI chat completions).
@@ -56,30 +59,37 @@ const SYSTEM = `Ты — ассистент обратной генерации 
 Поле action разбивает ролик на 3-6 отрезков по времени, t — в секундах. Если объект неочевиден, описывай форму, материал и поведение, не выдумывай.`;
 
 export async function POST(request: Request) {
-  const apiKey = process.env.POLLINATIONS_API_KEY;
+  const lookup = readServerKey("POLLINATIONS_API_KEY");
+  const apiKey = lookup.key;
   if (!apiKey) {
+    console.error(`[enrich] КЛЮЧА НЕТ → отвечаю 501. Разбор: ${lookup.reason}`);
     return Response.json(
       {
         error:
-          "AI-описание не включено: на сервере не задан POLLINATIONS_API_KEY. Локальный анализ работает как обычно — он измеряет свет, цвет, оптику и движение без внешних вызовов.",
+          "AI-описание не включено: сервер не видит POLLINATIONS_API_KEY. В журнале сервера написано, где именно он потерялся. Локальный анализ работает как обычно.",
         code: "no_api_key",
       },
       { status: 501 },
     );
   }
 
-  // Ключ уходит в заголовок: там разрешена только латиница. Кириллица или
-  // пробел в ключе иначе падали бы невнятной сетевой ошибкой.
+  // Ключ уходит в заголовок запроса, а там разрешена только латиница без
+  // пробелов. Форма ключа не проверяется: приставок вроде sk- или pk- у
+  // Pollinations сейчас может не быть вовсе.
   if (!/^[\x21-\x7e]+$/.test(apiKey)) {
+    console.error(
+      `[enrich] КЛЮЧ НЕ ГОДИТСЯ ДЛЯ ЗАГОЛОВКА: длина ${apiKey.length}, источник ${lookup.source}. Разбор: ${lookup.reason}`,
+    );
     return Response.json(
       {
         error:
-          "POLLINATIONS_API_KEY записан неверно: в ключе есть пробелы или не латинские символы. Скопируйте ключ заново с enter.pollinations.ai/keys.",
+          "POLLINATIONS_API_KEY записан неверно: в ключе есть пробел, перенос строки или не латинские символы. Скопируйте ключ заново с enter.pollinations.ai/keys.",
         code: "bad_key",
       },
       { status: 500 },
     );
   }
+  console.info(`[enrich] ключ принят: ${apiKey.length} знаков, источник ${lookup.source}. Разбор: ${lookup.reason}`);
 
   let body: EnrichRequest;
   try {
