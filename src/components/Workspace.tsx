@@ -6,7 +6,6 @@ import {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { Dropzone } from "@/components/Dropzone";
@@ -36,6 +35,13 @@ import {
   uid,
 } from "@/lib/format";
 import { buildPrompt, measurementLines, metricReadouts, type StylePreset } from "@/lib/prompt";
+import {
+  DEFAULT_ENRICH_FRAMES,
+  ENRICH_FRAME_OPTIONS,
+  type EnrichFrameCount,
+  type FrameLimitInfo,
+} from "@/lib/enrichOptions";
+import { createChoiceStore, useChoice } from "@/lib/prefs";
 import { analysisFromRow, toStoredMetrics } from "@/lib/store";
 import type {
   Analysis,
@@ -66,37 +72,20 @@ type Phase = "idle" | "decoding" | "probing" | "analyzing" | "ready";
 
 // Последний выбранный режим заполнения промпта живёт в памяти браузера.
 const APPLY_MODE_KEY = "revers-lab.apply-mode.v1";
-const DEFAULT_APPLY_MODE: ApplyMode = "model";
-const applyModeListeners = new Set<() => void>();
-let applyModeFallback: ApplyMode = DEFAULT_APPLY_MODE; // если память закрыта
+const applyModeStore = createChoiceStore<ApplyMode>(APPLY_MODE_KEY, ["model", "both", "metrics"], "model");
 
-function readApplyMode(): ApplyMode {
-  try {
-    const saved = window.localStorage.getItem(APPLY_MODE_KEY);
-    if (saved === "model" || saved === "both" || saved === "metrics") return saved;
-  } catch {
-    /* память браузера закрыта */
-  }
-  return applyModeFallback;
-}
+// Сколько кадров уходит модели — тоже помнится между заходами.
+const frameCountStore = createChoiceStore<EnrichFrameCount>(
+  "revers-lab.enrich-frames.v1",
+  ENRICH_FRAME_OPTIONS,
+  DEFAULT_ENRICH_FRAMES,
+);
 
-function saveApplyMode(mode: ApplyMode) {
-  applyModeFallback = mode;
-  try {
-    window.localStorage.setItem(APPLY_MODE_KEY, mode);
-  } catch {
-    /* не запомнилось между заходами — в этом заходе режим всё равно держится */
-  }
-  applyModeListeners.forEach((notify) => notify());
-}
-
-function subscribeApplyMode(notify: () => void) {
-  applyModeListeners.add(notify);
-  window.addEventListener("storage", notify);
-  return () => {
-    applyModeListeners.delete(notify);
-    window.removeEventListener("storage", notify);
-  };
+// Равномерно по списку: первый, последний и поровну между ними.
+function spreadEvenly<T>(items: T[], count: number): T[] {
+  if (items.length <= count) return items;
+  if (count <= 1) return [items[Math.floor(items.length / 2)]];
+  return Array.from({ length: count }, (_, i) => items[Math.round((i * (items.length - 1)) / (count - 1))]);
 }
 
 /*  Флаги --ar и --duration стоят в конце промпта измерений. Если ответ
@@ -163,7 +152,9 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
   /*  Последний выбор «чем заполнить промпт» живёт в памяти браузера. На
       сервере памяти нет — там режим по умолчанию, и разметка при первом
       показе совпадает; браузер сразу подставляет запомненный.         */
-  const applyMode = useSyncExternalStore(subscribeApplyMode, readApplyMode, () => DEFAULT_APPLY_MODE);
+  const applyMode = useChoice(applyModeStore);
+  const frameCount = useChoice(frameCountStore);
+  const [frameLimitInfo, setFrameLimitInfo] = useState<FrameLimitInfo | null>(null);
   const [enrichError, setEnrichError] = useState<string | null>(null);
 
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -171,6 +162,20 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
   const [historyError, setHistoryError] = useState<string | null>(null);
 
   const [toasts, setToasts] = useState<Toast[]>([]);
+
+  /*  Влезает ли выбранное число кадров в модель — спрашиваем сервер при
+      каждой смене числа. Не ответил — предел неизвестен, кнопку не прячем:
+      сервер всё равно проверит перед отправкой.                       */
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(`/api/enrich?frames=${frameCount}`, { signal: controller.signal })
+      .then((res) => (res.ok ? (res.json() as Promise<FrameLimitInfo>) : null))
+      .then((info) => setFrameLimitInfo(info))
+      .catch(() => {
+        if (!controller.signal.aborted) setFrameLimitInfo(null);
+      });
+    return () => controller.abort();
+  }, [frameCount]);
 
 
   const busy = phase === "decoding" || phase === "probing" || phase === "analyzing";
@@ -678,30 +683,31 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
     setEnrichState("loading");
     setEnrichError(null);
     try {
-      // Модели нужен ход ролика, а не одна картинка: берём восемь кадров
-      // по сценам, а если сцен мало — равномерно по таймлайну.
-      const WANT_FRAMES = 8;
+      // Сколько выбрано — столько и уходит, равномерно по ВСЕЙ длине ролика.
+      // Раньше при шести и больше склейках брались первые восемь сцен, и все
+      // они оказывались в начале видео.
+      if (frameLimitInfo?.fits === false && frameLimitInfo.frames === frameCount) {
+        throw new Error(frameLimitInfo.message ?? "Модель не принимает столько кадров");
+      }
+      const startedAt = performance.now();
       const frames: string[] = [];
       const v = videoRef.current;
       if (v && sourceUrl && meta) {
-        const byScenes = sceneTimes(analysis.scenes);
-        const times = (byScenes.length >= 6 ? byScenes : evenTimes(meta.durationSec, WANT_FRAMES)).slice(
-          0,
-          WANT_FRAMES,
-        );
         v.pause();
-        for (const t of times) {
+        for (const t of evenTimes(meta.durationSec, frameCount)) {
           const shot = await grabFrame(v, t, "image/jpeg", 0.72, 640);
           frames.push(await blobToDataUrl(shot.blob));
           URL.revokeObjectURL(shot.url);
         }
         v.currentTime = currentTime;
       } else if (shots.length) {
-        for (const s of shots.slice(0, WANT_FRAMES)) frames.push(await blobToDataUrl(s.blob));
+        const ordered = [...shots].sort((x, y) => x.time - y.time);
+        for (const s of spreadEvenly(ordered, frameCount)) frames.push(await blobToDataUrl(s.blob));
       } else if (thumbRef.current) {
         frames.push(thumbRef.current);
       }
       if (!frames.length) throw new Error("Нет ни одного кадра для отправки модели");
+      const captureMs = performance.now() - startedAt;
 
       const res = await fetch("/api/enrich", {
         method: "POST",
@@ -713,7 +719,10 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
           metrics: toStoredMetrics(analysis),
         }),
       });
-      const data = (await res.json()) as EnrichAnswer & { error?: string };
+      const data = (await res.json()) as EnrichAnswer & {
+        error?: string;
+        timing?: { frames: number; requestKb: number; modelMs: number };
+      };
       if (!res.ok) throw new Error(data.error ?? `Сервис описания ответил ${res.status}`);
       if (!data.ru && !data.en) throw new Error("Пустой ответ модели");
       setEnrichResult({
@@ -723,6 +732,13 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
         replacements: data.replacements ?? [],
         negative: data.negative ?? "",
         action: data.action ?? [],
+        timing: {
+          frames: frames.length,
+          captureMs,
+          modelMs: data.timing?.modelMs ?? null,
+          totalMs: performance.now() - startedAt,
+          requestKb: data.timing?.requestKb ?? null,
+        },
       });
       setEnrichState("done");
       pushToast("success", "Модель описала кадры");
@@ -731,7 +747,7 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
       setEnrichError(msg);
       setEnrichState("error");
     }
-  }, [analysis, bundle, currentTime, meta, pushToast, shots, sourceUrl, tags]);
+  }, [analysis, bundle, currentTime, frameCount, frameLimitInfo, meta, pushToast, shots, sourceUrl, tags]);
 
   /*  ТРИ РЕЖИМА ЗАПОЛНЕНИЯ. «Только модель» — описание сцены; «модель +
       замеры» — описание плюс то, что модель по кадрам не измерит: коды
@@ -742,7 +758,7 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
     (mode: ApplyMode) => {
       if (!bundle) return;
       if (mode !== "metrics" && !enrichResult) return;
-      saveApplyMode(mode);
+      applyModeStore.save(mode);
 
       const measured = analysis && meta ? measurementLines(analysis, meta) : null;
       const build = (local: string, ai: string, measures: string) => {
@@ -1123,6 +1139,9 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
                   onEnrich={() => void enrich()}
                   onApplyEnrich={applyEnrich}
                   applyMode={applyMode}
+                  frameCount={frameCount}
+                  onFrameCountChange={(n) => frameCountStore.save(n)}
+                  frameLimit={frameLimitInfo}
                   onDismissEnrich={() => {
                     setEnrichState("idle");
                     setEnrichResult(null);

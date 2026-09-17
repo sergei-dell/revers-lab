@@ -2,6 +2,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+import { DEFAULT_ENRICH_FRAMES, ENRICH_FRAME_OPTIONS, isFrameCount } from "@/lib/enrichOptions";
+import { frameLimit } from "@/lib/pollinationsModels";
 import { readServerKey } from "@/lib/serverKey";
 
 // Описание сцены по кадрам. Считает не наш код, а vision-модель через
@@ -25,8 +27,8 @@ const BASE_URL = (process.env.POLLINATIONS_BASE_URL ?? "https://gen.pollinations
 // response_format, держит до 10 изображений в запросе.
 const DEFAULT_MODEL = "openai/gpt-5.4-mini";
 
-const MIN_FRAMES = 6;
-const MAX_FRAMES = 8;
+const MIN_FRAMES = ENRICH_FRAME_OPTIONS[0];
+const MAX_FRAMES = ENRICH_FRAME_OPTIONS[ENRICH_FRAME_OPTIONS.length - 1];
 const MAX_SUMMARY = 6000;
 const MAX_TAGS = 400;
 const TIMEOUT_MS = 55_000;
@@ -57,6 +59,19 @@ const SYSTEM = `Ты — ассистент обратной генерации 
   "prompt_en": "the same prompt in English"
 }
 Поле action разбивает ролик на 3-6 отрезков по времени, t — в секундах. Если объект неочевиден, описывай форму, материал и поведение, не выдумывай.`;
+
+function currentModel(): string {
+  return process.env.POLLINATIONS_MODEL?.trim() || DEFAULT_MODEL;
+}
+
+// ВЛЕЗАЕТ ЛИ. Панель спрашивает заранее, сколько картинок держит модель,
+// чтобы сказать об этом до отправки, а не после ошибки сервиса. Ключ здесь
+// не нужен и наружу не уходит.
+export async function GET(request: Request) {
+  const asked = Number(new URL(request.url).searchParams.get("frames"));
+  const frames = isFrameCount(asked) ? asked : DEFAULT_ENRICH_FRAMES;
+  return Response.json(await frameLimit(BASE_URL, currentModel(), frames));
+}
 
 export async function POST(request: Request) {
   const lookup = readServerKey("POLLINATIONS_API_KEY");
@@ -98,14 +113,27 @@ export async function POST(request: Request) {
     return Response.json({ error: "Тело запроса должно быть JSON" }, { status: 400 });
   }
 
-  const frames = (body.frames ?? [])
-    .filter((f) => typeof f === "string" && f.startsWith("data:image/"))
-    .slice(0, MAX_FRAMES);
+  const frames = (body.frames ?? []).filter((f) => typeof f === "string" && f.startsWith("data:image/"));
   if (!frames.length) {
     return Response.json({ error: "Пришлите хотя бы один кадр в формате data URL" }, { status: 400 });
   }
+  if (frames.length > MAX_FRAMES) {
+    return Response.json(
+      { error: `За раз можно отправить не больше ${MAX_FRAMES} кадров, пришло ${frames.length}.`, code: "too_many_frames" },
+      { status: 400 },
+    );
+  }
 
-  const model = process.env.POLLINATIONS_MODEL?.trim() || DEFAULT_MODEL;
+  const model = currentModel();
+  // Предел модели проверяем сами: молча срезать кадры нельзя — человек
+  // выбрал число и должен знать, что ушло столько.
+  const limit = await frameLimit(BASE_URL, model, frames.length);
+  if (limit.fits === false) {
+    console.warn(`[enrich] кадров ${frames.length} больше предела модели ${model} (${limit.maxImages}) — не отправляю`);
+    return Response.json({ error: limit.message, code: "model_image_limit", limit }, { status: 422 });
+  }
+  const requestKb = Math.round(frames.reduce((sum, f) => sum + f.length, 0) / 1024);
+  const startedAt = Date.now();
   const metrics =
     typeof body.metrics === "string"
       ? body.metrics.slice(0, MAX_SUMMARY)
@@ -181,7 +209,9 @@ export async function POST(request: Request) {
         { status: 502 },
       );
     }
-    return Response.json({ ...parsed, model, source: "pollinations" });
+    const modelMs = Date.now() - startedAt;
+    console.info(`[enrich] модель ${model}: кадров ${frames.length}, запрос ${requestKb} КБ, ответ за ${modelMs} мс`);
+    return Response.json({ ...parsed, model, source: "pollinations", timing: { frames: frames.length, requestKb, modelMs } });
   } catch (error) {
     const aborted = error instanceof Error && error.name === "AbortError";
     // Причина падает в журнал сервера, человеку — короткая строка.

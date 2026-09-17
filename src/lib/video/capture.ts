@@ -171,6 +171,13 @@ export function seekVideo(video: HTMLVideoElement, time: number): Promise<void> 
       settled = true;
       video.removeEventListener("seeked", finish);
       clearTimeout(timer);
+      // Вкладка скрыта — браузер не рисует кадры и тормозит таймеры до
+      // секунды и дольше; ожидание отрисовки растягивало съёмку на минуты.
+      // После seeked кадр уже декодирован, его можно снимать сразу.
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        resolve();
+        return;
+      }
       // Give the decoder one paint tick so the canvas isn't stale, but never
       // wait forever: on a paused element the frame callback may not fire.
       let painted = false;

@@ -9,6 +9,7 @@ import {
   IconSpark,
 } from "@/components/icons";
 import { Segmented } from "@/components/ui";
+import { ENRICH_FRAME_OPTIONS, type EnrichFrameCount, type FrameLimitInfo } from "@/lib/enrichOptions";
 import { copyText, mergeTags } from "@/lib/format";
 import { STYLE_PRESETS, type StylePreset } from "@/lib/prompt";
 import type { PromptBundle } from "@/lib/types";
@@ -37,6 +38,8 @@ export type EnrichAnswer = {
   replacements: Array<{ from: string; to: string }>;
   negative: string;
   action: Array<{ t: string; beat: string }>;
+  /** сколько кадров ушло и сколько что заняло — показывается под ответом */
+  timing?: { frames: number; captureMs: number; modelMs: number | null; totalMs: number; requestKb: number | null };
 };
 export type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -60,6 +63,9 @@ export function PromptPanel({
   onEnrich,
   onApplyEnrich,
   applyMode,
+  frameCount,
+  onFrameCountChange,
+  frameLimit,
   onDismissEnrich,
   saveState,
   onSave,
@@ -83,6 +89,9 @@ export function PromptPanel({
   onEnrich: () => void;
   onApplyEnrich: (mode: ApplyMode) => void;
   applyMode: ApplyMode;
+  frameCount: EnrichFrameCount;
+  onFrameCountChange: (count: EnrichFrameCount) => void;
+  frameLimit: FrameLimitInfo | null;
   onDismissEnrich: () => void;
   saveState: SaveState;
   onSave: () => void;
@@ -281,22 +290,50 @@ export function PromptPanel({
               Усиление нейросетью
             </p>
           </div>
-          <button
-            type="button"
-            className="btn px-3 py-1.5 text-[12px]"
-            onClick={onEnrich}
-            disabled={enrichState === "loading"}
-          >
-            {enrichState === "loading" ? "Модель думает…" : "Описать кадры моделью"}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1" role="group" aria-label="Сколько кадров отправить модели">
+              {ENRICH_FRAME_OPTIONS.map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => onFrameCountChange(n)}
+                  disabled={enrichState === "loading"}
+                  title={`Отправить модели ${n} кадров, равномерно по всему ролику`}
+                  className={`min-w-[34px] rounded-md border px-2 py-1 font-mono text-[11.5px] transition ${
+                    n === frameCount
+                      ? "border-ember/60 bg-ember/14 text-ember"
+                      : "border-line bg-void/50 text-muted hover:border-edge hover:text-chalk"
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+              <span className="ml-0.5 font-mono text-[10.5px] uppercase tracking-[0.1em] text-dim">кадров</span>
+            </div>
+            <button
+              type="button"
+              className="btn px-3 py-1.5 text-[12px]"
+              onClick={onEnrich}
+              disabled={enrichState === "loading" || frameLimit?.fits === false}
+            >
+              {enrichState === "loading" ? "Модель думает…" : "Описать кадры моделью"}
+            </button>
+          </div>
         </div>
+
+        {frameLimit?.fits === false && frameLimit.frames === frameCount && frameLimit.message ? (
+          <div className="animate-rise mt-3 rounded-lg border border-warn/40 bg-warn/8 px-3 py-2.5">
+            <p className="text-[12.5px] leading-snug text-chalk/90">{frameLimit.message}</p>
+          </div>
+        ) : null}
 
         <p className="mt-2 text-[12px] leading-relaxed text-muted">
           Локальный движок измеряет физику кадра. Если на сервере задан{" "}
           <code className="rounded bg-void px-1 py-0.5 font-mono text-[11px] text-ice">
             POLLINATIONS_API_KEY
           </code>
-          , восемь ключевых кадров и метрики уходят в vision-модель — она называет объекты,
+          , {frameCount} кадров, взятых равномерно по всему ролику, и метрики уходят в vision-модель
+          {frameLimit?.maxImages ? ` (она принимает до ${frameLimit.maxImages} картинок)` : ""} — она называет объекты,
           среду и действие по секундам. Бренды, франшизы, персонажей и реальных людей модель
           заменяет архетипами и показывает список замен.
         </p>
@@ -317,6 +354,16 @@ export function PromptPanel({
         {enrichState === "done" && enrichResult ? (
           <div className="animate-rise mt-3 space-y-2.5">
             <div className="rounded-lg border border-good/35 bg-good/6 p-3">
+              {enrichResult.timing ? (
+                <p className="mb-2 font-mono text-[10.5px] uppercase tracking-[0.08em] text-dim">
+                  {enrichResult.timing.frames} кадров · снимали {(enrichResult.timing.captureMs / 1000).toFixed(1)} с
+                  {enrichResult.timing.modelMs !== null
+                    ? ` · модель ответила за ${(enrichResult.timing.modelMs / 1000).toFixed(1)} с`
+                    : ""}
+                  {` · всего ${(enrichResult.timing.totalMs / 1000).toFixed(1)} с`}
+                  {enrichResult.timing.requestKb !== null ? ` · ${enrichResult.timing.requestKb} КБ` : ""}
+                </p>
+              ) : null}
               <p className="hud-label mb-1 text-good/80">Ответ модели · RU</p>
               <p className="text-[12.5px] leading-relaxed text-chalk">{enrichResult.ru}</p>
               <p className="hud-label mb-1 mt-2.5 text-good/80">EN</p>
