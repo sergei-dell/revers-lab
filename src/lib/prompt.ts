@@ -188,6 +188,47 @@ function subjectPhrase(tags: string) {
   return { ru: list.join(", "), en: list.join(", ") };
 }
 
+export function durationFlag(durationSec: number, preset: StylePreset): number {
+  const seconds = Math.round(durationSec || 5);
+  if (preset === "seedance") return Math.max(3, Math.min(12, seconds));
+  return Math.max(1, seconds);
+}
+
+/*  БЛОК ЗАМЕРОВ для режима «модель + замеры»: то, что модель по кадрам
+    не измерит — точные коды палитры, разобранное движение камеры,
+    число планов и зерно.                                            */
+export function measurementLines(a: Analysis, meta: VideoMeta): { ru: string; en: string } {
+  const palette = a.palette.slice(0, 7);
+  const paletteRu = palette.map((p) => `${p.nameRu} ${p.hex}`).join(", ") || "нейтральная";
+  const paletteEn = palette.map((p) => `${p.name} ${p.hex}`).join(", ") || "neutral";
+  const camera = CAMERA_LABELS[a.camera];
+  const confidence = Math.round(a.cameraConfidence * 100);
+  const cuts =
+    a.scenes.length > 1
+      ? { ru: `${a.scenes.length} плана, жёсткие склейки`, en: `${a.scenes.length} shots, hard cuts` }
+      : { ru: "один непрерывный дубль", en: "one continuous take" };
+  const grainRu = a.grain > 0.035 ? `плёночное зерно ${(a.grain * 100).toFixed(1)}%` : `чистая цифра, зерно ${(a.grain * 100).toFixed(1)}%`;
+  const grainEn = a.grain > 0.035 ? `film grain ${(a.grain * 100).toFixed(1)}%` : `clean digital, grain ${(a.grain * 100).toFixed(1)}%`;
+  const motionRu = `движение ${(a.motionMean * 100).toFixed(1)}%, дрожание ${(a.motionShake * 100).toFixed(1)}%`;
+  const motionEn = `motion ${(a.motionMean * 100).toFixed(1)}%, shake ${(a.motionShake * 100).toFixed(1)}%`;
+  return {
+    ru: [
+      `Палитра: ${paletteRu}.`,
+      `Камера: ${camera.ru} (${confidence}% уверенности), ${motionRu}.`,
+      `Монтаж: ${cuts.ru}.`,
+      `Фактура: ${grainRu}, детализация ${(a.edges * 100).toFixed(1)}%.`,
+      `Съёмка: ${meta.width}×${meta.height} (${meta.aspect}), ${meta.durationSec.toFixed(1)} с, ${meta.fps} к/с.`,
+    ].join("\n"),
+    en: [
+      `Palette: ${paletteEn}.`,
+      `Camera: ${camera.en} (${confidence}% confidence), ${motionEn}.`,
+      `Editing: ${cuts.en}.`,
+      `Texture: ${grainEn}, detail ${(a.edges * 100).toFixed(1)}%.`,
+      `Source: ${meta.width}x${meta.height} (${meta.aspect}), ${meta.durationSec.toFixed(1)}s, ${meta.fps} fps.`,
+    ].join("\n"),
+  };
+}
+
 export function buildPrompt(input: {
   analysis: Analysis;
   meta: VideoMeta;
@@ -210,10 +251,10 @@ export function buildPrompt(input: {
       ? { ru: `${a.scenes.length} отдельных плана с жёсткими склейками`, en: `${a.scenes.length} distinct shots with hard cuts` }
       : { ru: "один непрерывный дубль", en: "one continuous take" };
   const ar = /^\d+(\.\d+)?:\d+$/.test(meta.aspect) ? `--ar ${meta.aspect}` : "--ar 16:9";
-  /*  Seedance 2.5 принимает длительность отдельным флагом и целыми
-      секундами: берём длину ролика и держим её в разумных границах.  */
-  const seedanceDuration = Math.max(3, Math.min(12, Math.round(meta.durationSec || 5)));
-  const flags = style.id === "seedance" ? `${ar} --duration ${seedanceDuration}` : ar;
+  /*  Длительность отдельным флагом нужна всем видеомоделям, поэтому
+      флаги идут в любом промпте. У Seedance 2.5 длина ограничена, у
+      остальных берётся как есть, целыми секундами.                   */
+  const flags = `${ar} --duration ${durationFlag(meta.durationSec, style.id)}`;
 
   const tech = {
     ru: `${meta.width}×${meta.height} (${meta.aspect}), ${meta.durationSec.toFixed(1)} с, ${meta.fps} к/с`,

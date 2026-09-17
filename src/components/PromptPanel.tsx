@@ -16,6 +16,19 @@ import type { PromptBundle } from "@/lib/types";
 type View = "prompt" | "json" | "negative";
 export type EnrichState = "idle" | "loading" | "done" | "error";
 
+// Чем заполнять окно промпта по кнопке.
+export type ApplyMode = "model" | "both" | "metrics";
+
+export const APPLY_MODES: Array<{ id: ApplyMode; label: string; hint: string }> = [
+  { id: "model", label: "Только модель", hint: "описание сцены от нейросети" },
+  {
+    id: "both",
+    label: "Модель + замеры",
+    hint: "описание сцены плюс палитра с кодами, движение камеры, монтаж и зерно",
+  },
+  { id: "metrics", label: "Только замеры", hint: "промпт из измерений, как до нейросети" },
+];
+
 // Что возвращает /api/enrich: готовый промпт, теги и разбор по частям.
 export type EnrichAnswer = {
   ru: string;
@@ -46,6 +59,7 @@ export function PromptPanel({
   enrichError,
   onEnrich,
   onApplyEnrich,
+  applyMode,
   onDismissEnrich,
   saveState,
   onSave,
@@ -67,7 +81,8 @@ export function PromptPanel({
   enrichResult: EnrichAnswer | null;
   enrichError: string | null;
   onEnrich: () => void;
-  onApplyEnrich: () => void;
+  onApplyEnrich: (mode: ApplyMode) => void;
+  applyMode: ApplyMode;
   onDismissEnrich: () => void;
   saveState: SaveState;
   onSave: () => void;
@@ -361,11 +376,32 @@ export function PromptPanel({
                 </button>
               </div>
             ) : null}
+            <div>
+              <p className="hud-label mb-1.5">Чем заполнить промпт</p>
+              <div className="flex flex-wrap gap-1.5">
+                {APPLY_MODES.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    title={m.hint}
+                    onClick={() => onApplyEnrich(m.id)}
+                    className={`rounded-lg border px-3 py-2 font-display text-[12px] font-semibold transition ${
+                      m.id === applyMode
+                        ? "border-ember/60 bg-ember/14 text-ember"
+                        : "border-line bg-void/50 text-muted hover:border-edge hover:text-chalk"
+                    }`}
+                  >
+                    {m.id === applyMode ? <IconCheck width={13} height={13} className="mr-1 inline" /> : null}
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1.5 text-[11.5px] leading-snug text-dim">
+                Флаги --ar и --duration добавляются в любом режиме. Выбранный режим запомнится.
+              </p>
+            </div>
+
             <div className="flex flex-wrap gap-2">
-              <button type="button" className="btn btn-primary" onClick={onApplyEnrich}>
-                <IconCheck width={15} height={15} />
-                Подставить в промпт
-              </button>
               <button
                 type="button"
                 className="btn"

@@ -12,7 +12,7 @@ import { Dropzone } from "@/components/Dropzone";
 import { FrameBoard, type ExtractMode } from "@/components/FrameBoard";
 import { HistoryPanel } from "@/components/HistoryPanel";
 import { MetricsPanel } from "@/components/MetricsPanel";
-import { PromptPanel, type EnrichAnswer, type EnrichState, type SaveState } from "@/components/PromptPanel";
+import { PromptPanel, type ApplyMode, type EnrichAnswer, type EnrichState, type SaveState } from "@/components/PromptPanel";
 import { VideoStage, type ClipRange } from "@/components/VideoStage";
 import {
   IconAlert,
@@ -33,7 +33,7 @@ import {
   slugify,
   uid,
 } from "@/lib/format";
-import { buildPrompt, metricReadouts, type StylePreset } from "@/lib/prompt";
+import { buildPrompt, measurementLines, metricReadouts, type StylePreset } from "@/lib/prompt";
 import { analysisFromRow, toStoredMetrics } from "@/lib/store";
 import type {
   Analysis,
@@ -60,6 +60,17 @@ import {
 import { analyzeVideo, CAMERA_LABELS } from "@/lib/video/analyze";
 
 type Phase = "idle" | "decoding" | "probing" | "analyzing" | "ready";
+
+// Последний выбранный режим заполнения промпта живёт в памяти браузера.
+const APPLY_MODE_KEY = "revers-lab.apply-mode.v1";
+
+/*  Флаги --ar и --duration стоят в конце промпта измерений. Если ответ
+    модели их не содержит, дописываем ту же строку к нему.           */
+function withFlags(text: string, localPrompt: string): string {
+  if (/--ar\b/.test(text) && /--duration\b/.test(text)) return text;
+  const flags = (localPrompt.match(/--ar [^\s]+ --duration \d+/) ?? [])[0];
+  return flags ? `${text.trimEnd()}\n\n${flags}` : text;
+}
 type Tab = "prompt" | "frames" | "metrics" | "history";
 
 const TABS: Array<{ id: Tab; label: string; icon: ReactNode }> = [
@@ -114,6 +125,10 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
 
   const [enrichState, setEnrichState] = useState<EnrichState>("idle");
   const [enrichResult, setEnrichResult] = useState<EnrichAnswer | null>(null);
+  /*  Каким был последний выбор «чем заполнить промпт». Читается из памяти
+      браузера после первого показа: на сервере её нет, и вид совпасть не
+      должен разойтись.                                              */
+  const [applyMode, setApplyMode] = useState<ApplyMode>("model");
   const [enrichError, setEnrichError] = useState<string | null>(null);
 
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -121,6 +136,15 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
   const [historyError, setHistoryError] = useState<string | null>(null);
 
   const [toasts, setToasts] = useState<Toast[]>([]);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(APPLY_MODE_KEY);
+      if (saved === "model" || saved === "both" || saved === "metrics") setApplyMode(saved);
+    } catch {
+      /* память браузера закрыта — остаётся режим по умолчанию */
+    }
+  }, []);
 
   const busy = phase === "decoding" || phase === "probing" || phase === "analyzing";
 
@@ -669,23 +693,52 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
     }
   }, [analysis, bundle, currentTime, meta, pushToast, shots, sourceUrl, tags]);
 
-  const applyEnrich = useCallback(() => {
-    if (!enrichResult || !bundle) return;
-    const merged = (local: string, ai: string) =>
-      ai.trim() ? `${ai.trim()}\n\n— технические измерения:\n${local}` : local;
-    setDraftRu(merged(bundle.ru, enrichResult.ru));
-    setDraftEn(merged(bundle.en, enrichResult.en));
-    setDirty(true);
-    setLang("ru");
-    setView("prompt");
-    if (enrichResult.tags.length) {
-      setTags((prev) => {
-        const extra = enrichResult.tags.join(", ");
-        return prev.trim() ? `${prev.replace(/[,;]\s*$/, "")}, ${extra}` : extra;
-      });
-    }
-    pushToast("success", "Ответ модели подставлен в промпт");
-  }, [bundle, enrichResult, pushToast]);
+  /*  ТРИ РЕЖИМА ЗАПОЛНЕНИЯ. «Только модель» — описание сцены; «модель +
+      замеры» — описание плюс то, что модель по кадрам не измерит: коды
+      палитры, движение камеры, монтаж, зерно; «только замеры» — как было
+      до нейросети. Флаги --ar и --duration стоят в промпте измерений и
+      дописываются к ответу модели, если их там нет.                  */
+  const applyEnrich = useCallback(
+    (mode: ApplyMode) => {
+      if (!bundle) return;
+      if (mode !== "metrics" && !enrichResult) return;
+      setApplyMode(mode);
+      try {
+        window.localStorage.setItem(APPLY_MODE_KEY, mode);
+      } catch {
+        /* не запомнилось — не беда */
+      }
+
+      const measured = analysis && meta ? measurementLines(analysis, meta) : null;
+      const build = (local: string, ai: string, measures: string) => {
+        if (mode === "metrics") return local;
+        const head = ai.trim();
+        if (!head) return local;
+        const body = mode === "both" && measures ? `${head}\n\n— измерено движком:\n${measures}` : head;
+        return withFlags(body, local);
+      };
+
+      setDraftRu(build(bundle.ru, enrichResult?.ru ?? "", measured?.ru ?? ""));
+      setDraftEn(build(bundle.en, enrichResult?.en ?? "", measured?.en ?? ""));
+      setDirty(true);
+      setLang("ru");
+      setView("prompt");
+      if (mode !== "metrics" && enrichResult?.tags.length) {
+        setTags((prev) => {
+          const extra = enrichResult.tags.join(", ");
+          return prev.trim() ? `${prev.replace(/[,;]\s*$/, "")}, ${extra}` : extra;
+        });
+      }
+      const said =
+        mode === "metrics"
+          ? "Промпт собран из измерений"
+          : mode === "both"
+            ? "Описание модели и замеры вместе"
+            : "Описание модели подставлено";
+      pushToast("success", said);
+    },
+    [analysis, bundle, enrichResult, meta, pushToast],
+  );
 
   const save = useCallback(async () => {
     if (!meta || !bundle || !analysis) return;
@@ -1036,6 +1089,7 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
                   enrichError={enrichError}
                   onEnrich={() => void enrich()}
                   onApplyEnrich={applyEnrich}
+                  applyMode={applyMode}
                   onDismissEnrich={() => {
                     setEnrichState("idle");
                     setEnrichResult(null);
