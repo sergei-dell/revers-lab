@@ -1,4 +1,5 @@
 import { CAMERA_LABELS } from "@/lib/video/analyze";
+import { uniqueTags } from "@/lib/format";
 import type { Analysis, PromptBundle, VideoMeta } from "@/lib/types";
 
 export type StylePreset = "cinema" | "commercial" | "anime" | "doc" | "vhs" | "seedance" | "none";
@@ -181,10 +182,7 @@ function subjectPhrase(tags: string) {
       ru: "объект съёмки не указан — добавьте теги, чтобы описать, что в кадре",
       en: "subject unspecified — add tags describing what is on screen",
     };
-  const list = clean
-    .split(/[,;]/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const list = uniqueTags(clean);
   return { ru: list.join(", "), en: list.join(", ") };
 }
 
@@ -237,7 +235,12 @@ export function buildPrompt(input: {
 }): PromptBundle {
   const { analysis: a, meta, tags = "", preset = "cinema" } = input;
   const style = STYLE_PRESETS.find((p) => p.id === preset) ?? STYLE_PRESETS[0];
-  const subject = subjectPhrase(tags);
+  // Тег, совпадающий с названием пресета, уже сказан в описании стиля.
+  const subject = subjectPhrase(
+    uniqueTags(tags)
+      .filter((t) => style.id === "none" || t.toLocaleLowerCase("ru") !== style.label.toLocaleLowerCase("ru"))
+      .join(", "),
+  );
   const light = lightingPhrase(a);
   const grade = gradePhrase(a);
   const texture = texturePhrase(a);
@@ -282,7 +285,7 @@ export function buildPrompt(input: {
     `Technical: ${tech.en}. ${flags}`,
   ];
 
-  const tagSet = new Set<string>([
+  const tagSet = uniqueTags([
     style.id !== "none" ? style.label.toLowerCase() : "",
     CAMERA_LABELS[a.camera].en,
     a.exposure === "low-key" ? "low-key" : a.exposure === "high-key" ? "high-key" : "mid-tone",
@@ -294,7 +297,7 @@ export function buildPrompt(input: {
     ...a.dominantHues.slice(0, 2),
     meta.aspect,
   ]);
-  const cleanTags = [...tagSet].filter((t) => t && t.length > 1);
+  const cleanTags = tagSet.filter((t) => t.length > 1);
 
   const headline = `${subject.ru.split(",")[0].slice(0, 46) || "Без названия"} · ${CAMERA_LABELS[a.camera].ru}`;
 

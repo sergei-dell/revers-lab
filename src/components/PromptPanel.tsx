@@ -9,7 +9,7 @@ import {
   IconSpark,
 } from "@/components/icons";
 import { Segmented } from "@/components/ui";
-import { copyText } from "@/lib/format";
+import { copyText, mergeTags } from "@/lib/format";
 import { STYLE_PRESETS, type StylePreset } from "@/lib/prompt";
 import type { PromptBundle } from "@/lib/types";
 
@@ -180,11 +180,7 @@ export function PromptPanel({
             <button
               key={t}
               type="button"
-              onClick={() =>
-                onTagsChange(
-                  tags.trim() ? `${tags.replace(/[,;]\s*$/, "")}, ${t}` : t,
-                )
-              }
+              onClick={() => onTagsChange(mergeTags(tags, t))}
               className="chip transition hover:border-ice/50 hover:text-ice"
               title="Добавить в теги объекта"
             >

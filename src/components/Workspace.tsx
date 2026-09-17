@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { Dropzone } from "@/components/Dropzone";
@@ -30,6 +31,7 @@ import {
   downloadBlob,
   formatBytes,
   formatTime,
+  mergeTags,
   slugify,
   uid,
 } from "@/lib/format";
@@ -58,11 +60,44 @@ import {
   type ImageFormatId,
 } from "@/lib/video/capture";
 import { analyzeVideo, CAMERA_LABELS } from "@/lib/video/analyze";
+import { readContainerFps } from "@/lib/video/containerFps";
 
 type Phase = "idle" | "decoding" | "probing" | "analyzing" | "ready";
 
 // Последний выбранный режим заполнения промпта живёт в памяти браузера.
 const APPLY_MODE_KEY = "revers-lab.apply-mode.v1";
+const DEFAULT_APPLY_MODE: ApplyMode = "model";
+const applyModeListeners = new Set<() => void>();
+let applyModeFallback: ApplyMode = DEFAULT_APPLY_MODE; // если память закрыта
+
+function readApplyMode(): ApplyMode {
+  try {
+    const saved = window.localStorage.getItem(APPLY_MODE_KEY);
+    if (saved === "model" || saved === "both" || saved === "metrics") return saved;
+  } catch {
+    /* память браузера закрыта */
+  }
+  return applyModeFallback;
+}
+
+function saveApplyMode(mode: ApplyMode) {
+  applyModeFallback = mode;
+  try {
+    window.localStorage.setItem(APPLY_MODE_KEY, mode);
+  } catch {
+    /* не запомнилось между заходами — в этом заходе режим всё равно держится */
+  }
+  applyModeListeners.forEach((notify) => notify());
+}
+
+function subscribeApplyMode(notify: () => void) {
+  applyModeListeners.add(notify);
+  window.addEventListener("storage", notify);
+  return () => {
+    applyModeListeners.delete(notify);
+    window.removeEventListener("storage", notify);
+  };
+}
 
 /*  Флаги --ar и --duration стоят в конце промпта измерений. Если ответ
     модели их не содержит, дописываем ту же строку к нему.           */
@@ -84,7 +119,7 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const objectUrlRef = useRef<string | null>(null);
   const thumbRef = useRef<string | null>(null);
-  const pendingRef = useRef<{ name: string; size: number; mime: string; source: "upload" | "url" } | null>(null);
+  const pendingRef = useRef<{ name: string; size: number; mime: string; source: "upload" | "url"; blob?: Blob } | null>(null);
 
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const [meta, setMeta] = useState<VideoMeta | null>(null);
@@ -125,10 +160,10 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
 
   const [enrichState, setEnrichState] = useState<EnrichState>("idle");
   const [enrichResult, setEnrichResult] = useState<EnrichAnswer | null>(null);
-  /*  Каким был последний выбор «чем заполнить промпт». Читается из памяти
-      браузера после первого показа: на сервере её нет, и вид совпасть не
-      должен разойтись.                                              */
-  const [applyMode, setApplyMode] = useState<ApplyMode>("model");
+  /*  Последний выбор «чем заполнить промпт» живёт в памяти браузера. На
+      сервере памяти нет — там режим по умолчанию, и разметка при первом
+      показе совпадает; браузер сразу подставляет запомненный.         */
+  const applyMode = useSyncExternalStore(subscribeApplyMode, readApplyMode, () => DEFAULT_APPLY_MODE);
   const [enrichError, setEnrichError] = useState<string | null>(null);
 
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -137,14 +172,6 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
 
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(APPLY_MODE_KEY);
-      if (saved === "model" || saved === "both" || saved === "metrics") setApplyMode(saved);
-    } catch {
-      /* память браузера закрыта — остаётся режим по умолчанию */
-    }
-  }, []);
 
   const busy = phase === "decoding" || phase === "probing" || phase === "analyzing";
 
@@ -257,7 +284,7 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
 
   // ---------------- ingest pipeline ----------------
   const startFromSource = useCallback(
-    (url: string, info: { name: string; size: number; mime: string; source: "upload" | "url" }) => {
+    (url: string, info: { name: string; size: number; mime: string; source: "upload" | "url"; blob?: Blob }) => {
       pendingRef.current = info;
       revokeShots(shots);
       setShots([]);
@@ -279,6 +306,12 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
       });
       setPhase("decoding");
       setDirty(false);
+      /*  Новый ролик — новый разбор с чистого листа. Теги, черновики и ответ
+          модели прежнего видео здесь жили дальше и копились: в разбор спальни
+          попадали «noir, rainy night» из прошлого ролика.              */
+      setTags("");
+      setDraftRu("");
+      setDraftEn("");
       setSaveState("idle");
       setSavedId(null);
       setEnrichState("idle");
@@ -301,6 +334,7 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
         size: file.size,
         mime: file.type || "video/mp4",
         source: "upload",
+        blob: file,
       });
     },
     [startFromSource],
@@ -327,6 +361,7 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
           size: blob.size,
           mime: type,
           source: "url",
+          blob,
         });
       } catch (e) {
         setPhase("idle");
@@ -360,8 +395,13 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
         if (!visible.videoWidth) throw new Error("Видеодорожка пустая: нет изображения");
 
         setPhase("probing");
-        setProgress({ done: 0, total: 1, label: "измеряем частоту кадров…" });
-        const { fps, detected } = await probeFps(visible, 700);
+        setProgress({ done: 0, total: 1, label: "читаем частоту кадров из файла…" });
+        // Частота — из метаданных контейнера; замер воспроизведением только
+        // если файл её не хранит.
+        const fromFile = info.blob ? await readContainerFps(info.blob) : null;
+        const { fps, detected } = fromFile
+          ? { fps: fromFile, detected: true }
+          : await probeFps(visible, 700);
         if (cancelled) return;
 
         const nextMeta: VideoMeta = {
@@ -702,12 +742,7 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
     (mode: ApplyMode) => {
       if (!bundle) return;
       if (mode !== "metrics" && !enrichResult) return;
-      setApplyMode(mode);
-      try {
-        window.localStorage.setItem(APPLY_MODE_KEY, mode);
-      } catch {
-        /* не запомнилось — не беда */
-      }
+      saveApplyMode(mode);
 
       const measured = analysis && meta ? measurementLines(analysis, meta) : null;
       const build = (local: string, ai: string, measures: string) => {
@@ -724,10 +759,7 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
       setLang("ru");
       setView("prompt");
       if (mode !== "metrics" && enrichResult?.tags.length) {
-        setTags((prev) => {
-          const extra = enrichResult.tags.join(", ");
-          return prev.trim() ? `${prev.replace(/[,;]\s*$/, "")}, ${extra}` : extra;
-        });
+        setTags((prev) => mergeTags(prev, enrichResult.tags));
       }
       const said =
         mode === "metrics"
@@ -869,6 +901,7 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
     setProgress(null);
     setFatal(null);
     setDirty(false);
+    setTags("");
     setDraftRu("");
     setDraftEn("");
     setSaveState("idle");

@@ -89,25 +89,49 @@ export async function attachSource(
   });
 }
 
+/*  Запасной замер частоты, когда в файле её не прочесть (редкий кодек,
+    фрагментированный MP4). Считаем по ВРЕМЕНИ ВИДЕО: сколько новых кадров
+    показано за сколько секунд ролика. Прежний способ делил кадры на
+    секунды настоящего времени — фоновая вкладка или тормоза декодера
+    давали 48 к/с там, где в файле 24.                                */
 export async function probeFps(
   video: HTMLVideoElement,
   budgetMs = 900,
 ): Promise<{ fps: number; detected: boolean }> {
   const fallback = { fps: 30, detected: false };
+  type FrameMeta = { mediaTime: number; presentedFrames: number };
+  const withCallback = video as HTMLVideoElement & {
+    requestVideoFrameCallback?: (cb: (now: number, meta: FrameMeta) => void) => number;
+  };
+  if (!withCallback.requestVideoFrameCallback) return fallback;
   try {
-    const startedAt = performance.now();
-    const before = video.getVideoPlaybackQuality?.().totalVideoFrames ?? 0;
+    const samples: FrameMeta[] = [];
     video.currentTime = 0;
+    video.muted = true;
     await video.play();
-    await new Promise((r) => setTimeout(r, budgetMs));
-    const after = video.getVideoPlaybackQuality?.().totalVideoFrames ?? 0;
+    await new Promise<void>((resolve) => {
+      const stopAt = performance.now() + budgetMs;
+      const tick = (_now: number, meta: FrameMeta) => {
+        samples.push({ mediaTime: meta.mediaTime, presentedFrames: meta.presentedFrames });
+        if (performance.now() < stopAt && samples.length < 240) withCallback.requestVideoFrameCallback!(tick);
+        else resolve();
+      };
+      withCallback.requestVideoFrameCallback!(tick);
+      setTimeout(resolve, budgetMs + 400);
+    });
     video.pause();
-    const elapsed = (performance.now() - startedAt) / 1000;
-    const frames = after - before;
-    if (frames > 4 && elapsed > 0.05) {
-      const fps = frames / elapsed;
-      const snapped = snapFps(fps);
-      return { fps: snapped, detected: true };
+    // Разница между соседними кадрами по времени ролика; берём медиану —
+    // пропущенные при отрисовке кадры её не сдвигают.
+    const steps: number[] = [];
+    for (let i = 1; i < samples.length; i++) {
+      const dt = samples[i].mediaTime - samples[i - 1].mediaTime;
+      const df = samples[i].presentedFrames - samples[i - 1].presentedFrames;
+      if (dt > 0 && df === 1) steps.push(dt);
+    }
+    if (steps.length >= 3) {
+      steps.sort((x, y) => x - y);
+      const median = steps[Math.floor(steps.length / 2)];
+      return { fps: snapFps(1 / median), detected: true };
     }
   } catch {
     /* ignore, use fallback */
