@@ -1,4 +1,5 @@
 import { Workspace } from "@/components/Workspace";
+import { STATIC_BUILD } from "@/lib/staticMode";
 import {
   ApertureMark,
   IconBolt,
@@ -117,8 +118,8 @@ export default function Page() {
               декодер в браузере
             </span>
             <span className="chip border-good/35 text-good">
-              <span className="h-1.5 w-1.5 rounded-full bg-good text-good" />
-              без сервера
+              <span className="h-1.5 w-1.5 rounded-full animate-pulse-dot bg-good text-good" />
+              {STATIC_BUILD ? "без сервера" : "анализ в браузере"}
             </span>
           </div>
         </div>
@@ -134,7 +135,7 @@ export default function Page() {
             </h2>
             <p className="max-w-[46ch] text-[12.5px] leading-relaxed text-muted">
               Всё считается на клиенте: кадр декодируется в canvas, затем по пикселям
-              снимаются метрики. Ни файл, ни изображения никуда не уходят — сервера у сайта нет.
+              снимаются метрики. Ни файл, ни полноразмерные изображения на сервер не уходят.
             </p>
           </div>
 

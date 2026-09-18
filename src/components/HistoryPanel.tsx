@@ -3,6 +3,7 @@
 import { IconAlert, IconHistory, IconPlay, IconTrash } from "@/components/icons";
 import { EmptyNote } from "@/components/ui";
 import { formatBytes, formatTime } from "@/lib/format";
+import { STATIC_BUILD } from "@/lib/staticMode";
 import type { HistoryItem } from "@/lib/types";
 
 function dateLabel(iso: string): string {
@@ -38,9 +39,16 @@ export function HistoryPanel({
           <IconHistory width={12} height={12} />
           {items.length} записей
         </span>
-        <span className="chip" title="История хранится только в этом браузере на этом устройстве">
+        <span
+          className="chip"
+          title={
+            STATIC_BUILD
+              ? "История хранится только в этом браузере на этом устройстве"
+              : "История хранится в PostgreSQL на сервере"
+          }
+        >
           <span className="h-1.5 w-1.5 rounded-full bg-good" />
-          в этом браузере
+          {STATIC_BUILD ? "в этом браузере" : "в базе"}
         </span>
         <button
           type="button"
@@ -77,8 +85,10 @@ export function HistoryPanel({
       {!loading && !items.length && !error ? (
         <EmptyNote>
           История пуста. Как только вы проанализируете видео и нажмёте «В историю», запись
-          с метриками, палитрой, промптом и миниатюрой сохранится в памяти этого браузера.
-          На другом устройстве или в другом браузере её не будет.
+          с метриками, палитрой, промптом и миниатюрой{" "}
+          {STATIC_BUILD
+            ? "сохранится в памяти этого браузера — на другом устройстве её не будет."
+            : "ляжет в PostgreSQL."}
         </EmptyNote>
       ) : null}
 

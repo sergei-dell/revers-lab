@@ -12,7 +12,7 @@ import { Dropzone } from "@/components/Dropzone";
 import { FrameBoard, type ExtractMode } from "@/components/FrameBoard";
 import { HistoryPanel } from "@/components/HistoryPanel";
 import { MetricsPanel } from "@/components/MetricsPanel";
-import { PromptPanel, type SaveState } from "@/components/PromptPanel";
+import { PromptPanel, type ApplyMode, type EnrichAnswer, type EnrichState, type SaveState } from "@/components/PromptPanel";
 import { VideoStage, type ClipRange } from "@/components/VideoStage";
 import {
   IconAlert,
@@ -30,11 +30,20 @@ import {
   downloadBlob,
   formatBytes,
   formatTime,
+  mergeTags,
   slugify,
   uid,
 } from "@/lib/format";
-import { buildPrompt, metricReadouts, type StylePreset } from "@/lib/prompt";
+import { buildPrompt, measurementLines, metricReadouts, type StylePreset } from "@/lib/prompt";
+import {
+  DEFAULT_ENRICH_FRAMES,
+  ENRICH_FRAME_OPTIONS,
+  type EnrichFrameCount,
+  type FrameLimitInfo,
+} from "@/lib/enrichOptions";
 import { readHistory, writeHistory } from "@/lib/localHistory";
+import { createChoiceStore, useChoice } from "@/lib/prefs";
+import { STATIC_BUILD } from "@/lib/staticMode";
 import { analysisFromRow, toStoredMetrics } from "@/lib/store";
 import type {
   Analysis,
@@ -59,8 +68,35 @@ import {
   type ImageFormatId,
 } from "@/lib/video/capture";
 import { analyzeVideo, CAMERA_LABELS } from "@/lib/video/analyze";
+import { readContainerFps } from "@/lib/video/containerFps";
 
 type Phase = "idle" | "decoding" | "probing" | "analyzing" | "ready";
+
+// Последний выбранный режим заполнения промпта живёт в памяти браузера.
+const APPLY_MODE_KEY = "revers-lab.apply-mode.v1";
+const applyModeStore = createChoiceStore<ApplyMode>(APPLY_MODE_KEY, ["model", "both", "metrics"], "model");
+
+// Сколько кадров уходит модели — тоже помнится между заходами.
+const frameCountStore = createChoiceStore<EnrichFrameCount>(
+  "revers-lab.enrich-frames.v1",
+  ENRICH_FRAME_OPTIONS,
+  DEFAULT_ENRICH_FRAMES,
+);
+
+// Равномерно по списку: первый, последний и поровну между ними.
+function spreadEvenly<T>(items: T[], count: number): T[] {
+  if (items.length <= count) return items;
+  if (count <= 1) return [items[Math.floor(items.length / 2)]];
+  return Array.from({ length: count }, (_, i) => items[Math.round((i * (items.length - 1)) / (count - 1))]);
+}
+
+/*  Флаги --ar и --duration стоят в конце промпта измерений. Если ответ
+    модели их не содержит, дописываем ту же строку к нему.           */
+function withFlags(text: string, localPrompt: string): string {
+  if (/--ar\b/.test(text) && /--duration\b/.test(text)) return text;
+  const flags = (localPrompt.match(/--ar [^\s]+ --duration \d+/) ?? [])[0];
+  return flags ? `${text.trimEnd()}\n\n${flags}` : text;
+}
 type Tab = "prompt" | "frames" | "metrics" | "history";
 
 const TABS: Array<{ id: Tab; label: string; icon: ReactNode }> = [
@@ -74,7 +110,7 @@ export function Workspace() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const objectUrlRef = useRef<string | null>(null);
   const thumbRef = useRef<string | null>(null);
-  const pendingRef = useRef<{ name: string; size: number; mime: string; source: "upload" | "url" } | null>(null);
+  const pendingRef = useRef<{ name: string; size: number; mime: string; source: "upload" | "url"; blob?: Blob } | null>(null);
 
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const [meta, setMeta] = useState<VideoMeta | null>(null);
@@ -113,11 +149,37 @@ export function Workspace() {
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [savedId, setSavedId] = useState<string | null>(null);
 
+  const [enrichState, setEnrichState] = useState<EnrichState>("idle");
+  const [enrichResult, setEnrichResult] = useState<EnrichAnswer | null>(null);
+  /*  Последний выбор «чем заполнить промпт» живёт в памяти браузера. На
+      сервере памяти нет — там режим по умолчанию, и разметка при первом
+      показе совпадает; браузер сразу подставляет запомненный.         */
+  const applyMode = useChoice(applyModeStore);
+  const frameCount = useChoice(frameCountStore);
+  const [frameLimitInfo, setFrameLimitInfo] = useState<FrameLimitInfo | null>(null);
+  const [enrichError, setEnrichError] = useState<string | null>(null);
+
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
 
   const [toasts, setToasts] = useState<Toast[]>([]);
+
+  /*  Влезает ли выбранное число кадров в модель — спрашиваем сервер при
+      каждой смене числа. Не ответил — предел неизвестен, кнопку не прячем:
+      сервер всё равно проверит перед отправкой.                       */
+  useEffect(() => {
+    if (STATIC_BUILD) return;
+    const controller = new AbortController();
+    fetch(`/api/enrich?frames=${frameCount}`, { signal: controller.signal })
+      .then((res) => (res.ok ? (res.json() as Promise<FrameLimitInfo>) : null))
+      .then((info) => setFrameLimitInfo(info))
+      .catch(() => {
+        if (!controller.signal.aborted) setFrameLimitInfo(null);
+      });
+    return () => controller.abort();
+  }, [frameCount]);
+
 
   const busy = phase === "decoding" || phase === "probing" || phase === "analyzing";
 
@@ -156,7 +218,15 @@ export function Workspace() {
     setHistoryLoading(true);
     setHistoryError(null);
     try {
-      setHistory(readHistory());
+      // Со статической сборки сервера нет: история живёт в памяти браузера.
+      if (STATIC_BUILD) {
+        setHistory(readHistory());
+      } else {
+        const res = await fetch("/api/analyses?limit=30", { cache: "no-store" });
+        const data = (await res.json()) as { items?: HistoryItem[]; error?: string };
+        if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+        setHistory(data.items ?? []);
+      }
     } catch (e) {
       setHistoryError(e instanceof Error ? e.message : "Не удалось получить историю");
     } finally {
@@ -227,7 +297,7 @@ export function Workspace() {
 
   // ---------------- ingest pipeline ----------------
   const startFromSource = useCallback(
-    (url: string, info: { name: string; size: number; mime: string; source: "upload" | "url" }) => {
+    (url: string, info: { name: string; size: number; mime: string; source: "upload" | "url"; blob?: Blob }) => {
       pendingRef.current = info;
       revokeShots(shots);
       setShots([]);
@@ -249,8 +319,17 @@ export function Workspace() {
       });
       setPhase("decoding");
       setDirty(false);
+      /*  Новый ролик — новый разбор с чистого листа. Теги, черновики и ответ
+          модели прежнего видео здесь жили дальше и копились: в разбор спальни
+          попадали «noir, rainy night» из прошлого ролика.              */
+      setTags("");
+      setDraftRu("");
+      setDraftEn("");
       setSaveState("idle");
       setSavedId(null);
+      setEnrichState("idle");
+      setEnrichResult(null);
+      setEnrichError(null);
       setClip({ a: null, b: null });
       setFatal(null);
       setTab("prompt");
@@ -268,9 +347,46 @@ export function Workspace() {
         size: file.size,
         mime: file.type || "video/mp4",
         source: "upload",
+        blob: file,
       });
     },
     [startFromSource],
+  );
+
+  const handleUrl = useCallback(
+    async (raw: string) => {
+      setPhase("decoding");
+      setProgress({ done: 0, total: 1, label: "скачиваем видео через серверный прокси…" });
+      setFatal(null);
+      try {
+        const res = await fetch(`/api/proxy?url=${encodeURIComponent(raw)}`);
+        const type = res.headers.get("content-type") ?? "video/mp4";
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(data.error ?? `Источник ответил ${res.status}`);
+        }
+        const blob = await res.blob();
+        if (!blob.size) throw new Error("Источник вернул пустой файл");
+        const guess = decodeURIComponent(raw.split("/").pop()?.split("?")[0] ?? "") || "clip.mp4";
+        const url = URL.createObjectURL(blob);
+        startFromSource(url, {
+          name: guess,
+          size: blob.size,
+          mime: type,
+          source: "url",
+          blob,
+        });
+      } catch (e) {
+        setPhase("idle");
+        setProgress(null);
+        setFatal({
+          title: "Не удалось загрузить видео по ссылке",
+          detail: e instanceof Error ? e.message : "Неизвестная ошибка сети",
+        });
+        pushToast("error", "Ссылка не открылась", e instanceof Error ? e.message : undefined);
+      }
+    },
+    [pushToast, startFromSource],
   );
 
   useEffect(() => {
@@ -292,8 +408,13 @@ export function Workspace() {
         if (!visible.videoWidth) throw new Error("Видеодорожка пустая: нет изображения");
 
         setPhase("probing");
-        setProgress({ done: 0, total: 1, label: "измеряем частоту кадров…" });
-        const { fps, detected } = await probeFps(visible, 700);
+        setProgress({ done: 0, total: 1, label: "читаем частоту кадров из файла…" });
+        // Частота — из метаданных контейнера; замер воспроизведением только
+        // если файл её не хранит.
+        const fromFile = info.blob ? await readContainerFps(info.blob) : null;
+        const { fps, detected } = fromFile
+          ? { fps: fromFile, detected: true }
+          : await probeFps(visible, 700);
         if (cancelled) return;
 
         const nextMeta: VideoMeta = {
@@ -565,6 +686,116 @@ export function Workspace() {
     pushToast("success", "Отчёт выгружен");
   }, [analysis, bundle, draftEn, draftRu, meta, pushToast]);
 
+  const enrich = useCallback(async () => {
+    if (!analysis || !bundle) return;
+    setEnrichState("loading");
+    setEnrichError(null);
+    try {
+      // Сколько выбрано — столько и уходит, равномерно по ВСЕЙ длине ролика.
+      // Раньше при шести и больше склейках брались первые восемь сцен, и все
+      // они оказывались в начале видео.
+      if (frameLimitInfo?.fits === false && frameLimitInfo.frames === frameCount) {
+        throw new Error(frameLimitInfo.message ?? "Модель не принимает столько кадров");
+      }
+      const startedAt = performance.now();
+      const frames: string[] = [];
+      const v = videoRef.current;
+      if (v && sourceUrl && meta) {
+        v.pause();
+        for (const t of evenTimes(meta.durationSec, frameCount)) {
+          const shot = await grabFrame(v, t, "image/jpeg", 0.72, 640);
+          frames.push(await blobToDataUrl(shot.blob));
+          URL.revokeObjectURL(shot.url);
+        }
+        v.currentTime = currentTime;
+      } else if (shots.length) {
+        const ordered = [...shots].sort((x, y) => x.time - y.time);
+        for (const s of spreadEvenly(ordered, frameCount)) frames.push(await blobToDataUrl(s.blob));
+      } else if (thumbRef.current) {
+        frames.push(thumbRef.current);
+      }
+      if (!frames.length) throw new Error("Нет ни одного кадра для отправки модели");
+      const captureMs = performance.now() - startedAt;
+
+      const res = await fetch("/api/enrich", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          frames,
+          tags,
+          summary: JSON.stringify(bundle.structured, null, 2),
+          metrics: toStoredMetrics(analysis),
+        }),
+      });
+      const data = (await res.json()) as EnrichAnswer & {
+        error?: string;
+        timing?: { frames: number; requestKb: number; modelMs: number };
+      };
+      if (!res.ok) throw new Error(data.error ?? `Сервис описания ответил ${res.status}`);
+      if (!data.ru && !data.en) throw new Error("Пустой ответ модели");
+      setEnrichResult({
+        ru: data.ru ?? "",
+        en: data.en ?? "",
+        tags: data.tags ?? [],
+        replacements: data.replacements ?? [],
+        negative: data.negative ?? "",
+        action: data.action ?? [],
+        timing: {
+          frames: frames.length,
+          captureMs,
+          modelMs: data.timing?.modelMs ?? null,
+          totalMs: performance.now() - startedAt,
+          requestKb: data.timing?.requestKb ?? null,
+        },
+      });
+      setEnrichState("done");
+      pushToast("success", "Модель описала кадры");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Неизвестная ошибка";
+      setEnrichError(msg);
+      setEnrichState("error");
+    }
+  }, [analysis, bundle, currentTime, frameCount, frameLimitInfo, meta, pushToast, shots, sourceUrl, tags]);
+
+  /*  ТРИ РЕЖИМА ЗАПОЛНЕНИЯ. «Только модель» — описание сцены; «модель +
+      замеры» — описание плюс то, что модель по кадрам не измерит: коды
+      палитры, движение камеры, монтаж, зерно; «только замеры» — как было
+      до нейросети. Флаги --ar и --duration стоят в промпте измерений и
+      дописываются к ответу модели, если их там нет.                  */
+  const applyEnrich = useCallback(
+    (mode: ApplyMode) => {
+      if (!bundle) return;
+      if (mode !== "metrics" && !enrichResult) return;
+      applyModeStore.save(mode);
+
+      const measured = analysis && meta ? measurementLines(analysis, meta) : null;
+      const build = (local: string, ai: string, measures: string) => {
+        if (mode === "metrics") return local;
+        const head = ai.trim();
+        if (!head) return local;
+        const body = mode === "both" && measures ? `${head}\n\n— измерено движком:\n${measures}` : head;
+        return withFlags(body, local);
+      };
+
+      setDraftRu(build(bundle.ru, enrichResult?.ru ?? "", measured?.ru ?? ""));
+      setDraftEn(build(bundle.en, enrichResult?.en ?? "", measured?.en ?? ""));
+      setDirty(true);
+      setLang("ru");
+      setView("prompt");
+      if (mode !== "metrics" && enrichResult?.tags.length) {
+        setTags((prev) => mergeTags(prev, enrichResult.tags));
+      }
+      const said =
+        mode === "metrics"
+          ? "Промпт собран из измерений"
+          : mode === "both"
+            ? "Описание модели и замеры вместе"
+            : "Описание модели подставлено";
+      pushToast("success", said);
+    },
+    [analysis, bundle, enrichResult, meta, pushToast],
+  );
+
   const save = useCallback(async () => {
     if (!meta || !bundle || !analysis) return;
     setSaveState("saving");
@@ -573,45 +804,78 @@ export function Workspace() {
         tags.trim().split(/[,;]/)[0].trim().slice(0, 70) ||
         meta.fileName.replace(/\.[^.]+$/, "").slice(0, 70) ||
         "Клип";
-      const item: HistoryItem = {
-        id: uid("h"),
-        title,
-        fileName: meta.fileName,
-        source: meta.source,
-        durationSec: meta.durationSec.toFixed(3),
-        width: meta.width,
-        height: meta.height,
-        fps: meta.fps.toFixed(2),
-        sizeBytes: meta.sizeBytes,
-        subjectTags: tags,
-        promptRu: draftRu || bundle.ru,
-        promptEn: draftEn || bundle.en,
-        negativePrompt: bundle.negative,
-        structured: bundle.structured,
-        metrics: toStoredMetrics(analysis),
-        palette: analysis.palette,
-        scenes: analysis.scenes,
-        frameCount: shots.length,
-        thumb: thumbRef.current,
-        createdAt: new Date().toISOString(),
-      };
-      const { saved, dropped } = writeHistory([item, ...readHistory()]);
-      setHistory(saved);
-      setHistoryError(null);
+      if (STATIC_BUILD) {
+        const item: HistoryItem = {
+          id: uid("h"),
+          title,
+          fileName: meta.fileName,
+          source: meta.source,
+          durationSec: meta.durationSec.toFixed(3),
+          width: meta.width,
+          height: meta.height,
+          fps: meta.fps.toFixed(2),
+          sizeBytes: meta.sizeBytes,
+          subjectTags: tags,
+          promptRu: draftRu || bundle.ru,
+          promptEn: draftEn || bundle.en,
+          negativePrompt: bundle.negative,
+          structured: bundle.structured,
+          metrics: toStoredMetrics(analysis),
+          palette: analysis.palette,
+          scenes: analysis.scenes,
+          frameCount: shots.length,
+          thumb: thumbRef.current,
+          createdAt: new Date().toISOString(),
+        };
+        const { saved, dropped } = writeHistory([item, ...readHistory()]);
+        setHistory(saved);
+        setHistoryError(null);
+        setSaveState("saved");
+        setSavedId(item.id);
+        pushToast(
+          "success",
+          "Сохранено в историю",
+          dropped
+            ? `Память браузера заполнена — удалено старых записей: ${dropped}`
+            : "Запись хранится в этом браузере",
+        );
+        return;
+      }
+      const res = await fetch("/api/analyses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          fileName: meta.fileName,
+          source: meta.source,
+          durationSec: meta.durationSec,
+          width: meta.width,
+          height: meta.height,
+          fps: meta.fps,
+          sizeBytes: meta.sizeBytes,
+          subjectTags: tags,
+          promptRu: draftRu || bundle.ru,
+          promptEn: draftEn || bundle.en,
+          negativePrompt: bundle.negative,
+          structured: bundle.structured,
+          metrics: toStoredMetrics(analysis),
+          palette: analysis.palette,
+          scenes: analysis.scenes,
+          frameCount: shots.length,
+          thumb: thumbRef.current,
+        }),
+      });
+      const data = (await res.json()) as { item?: HistoryItem; error?: string; detail?: string };
+      if (!res.ok) throw new Error(data.error ?? data.detail ?? `HTTP ${res.status}`);
       setSaveState("saved");
-      setSavedId(item.id);
-      pushToast(
-        "success",
-        "Сохранено в историю",
-        dropped
-          ? `Память браузера заполнена — удалено старых записей: ${dropped}`
-          : "Запись хранится в этом браузере",
-      );
+      setSavedId(data.item?.id ?? null);
+      pushToast("success", "Сохранено в PostgreSQL", `Запись ${data.item?.id.slice(0, 8) ?? ""}`);
+      void refreshHistory();
     } catch (e) {
       setSaveState("error");
       pushToast("error", "Не удалось сохранить", e instanceof Error ? e.message : undefined);
     }
-  }, [analysis, bundle, draftEn, draftRu, meta, pushToast, shots.length, tags]);
+  }, [analysis, bundle, draftEn, draftRu, meta, pushToast, refreshHistory, shots.length, tags]);
 
   const openHistoryItem = useCallback((item: HistoryItem) => {
     const a = analysisFromRow(item);
@@ -655,20 +919,30 @@ export function Workspace() {
   }, [shots]);
 
   const deleteHistoryItem = useCallback(
-    (id: string) => {
+    async (id: string) => {
+      const previous = history;
+      setHistory((prev) => prev.filter((h) => h.id !== id));
       try {
-        const { saved } = writeHistory(readHistory().filter((h) => h.id !== id));
-        setHistory(saved);
+        if (STATIC_BUILD) {
+          setHistory(writeHistory(readHistory().filter((h) => h.id !== id)).saved);
+        } else {
+          const res = await fetch(`/api/analyses/${id}`, { method: "DELETE" });
+          if (!res.ok) {
+            const data = (await res.json().catch(() => ({}))) as { error?: string };
+            throw new Error(data.error ?? `HTTP ${res.status}`);
+          }
+        }
         if (savedId === id) {
           setSavedId(null);
           setSaveState("idle");
         }
         pushToast("success", "Запись удалена");
       } catch (e) {
+        setHistory(previous);
         pushToast("error", "Удаление не удалось", e instanceof Error ? e.message : undefined);
       }
     },
-    [pushToast, savedId],
+    [history, pushToast, savedId],
   );
 
   const resetAll = useCallback(() => {
@@ -692,10 +966,13 @@ export function Workspace() {
     setProgress(null);
     setFatal(null);
     setDirty(false);
+    setTags("");
     setDraftRu("");
     setDraftEn("");
     setSaveState("idle");
     setSavedId(null);
+    setEnrichState("idle");
+    setEnrichResult(null);
     setClip({ a: null, b: null });
     setCurrentTime(0);
   }, [shots]);
@@ -748,7 +1025,7 @@ export function Workspace() {
               </div>
             </div>
           ) : null}
-          <Dropzone onFile={handleFile} busy={busy} />
+          <Dropzone onFile={handleFile} onUrl={(u) => void handleUrl(u)} busy={busy} />
         </>
       ) : null}
 
@@ -879,7 +1156,7 @@ export function Workspace() {
                 );
               })}
               <span className="ml-auto hidden pr-2 font-mono text-[10px] uppercase tracking-[0.12em] text-dim lg:block">
-                {saveState === "saved" ? "в истории" : "черновик"}
+                {saveState === "saved" ? `в базе${savedId ? ` · ${savedId.slice(0, 8)}` : ""}` : "черновик"}
               </span>
             </div>
 
@@ -905,6 +1182,20 @@ export function Workspace() {
                     }
                   }}
                   onDownload={downloadPrompt}
+                  enrichState={enrichState}
+                  enrichResult={enrichResult}
+                  enrichError={enrichError}
+                  onEnrich={() => void enrich()}
+                  onApplyEnrich={applyEnrich}
+                  applyMode={applyMode}
+                  frameCount={frameCount}
+                  onFrameCountChange={(n) => frameCountStore.save(n)}
+                  frameLimit={frameLimitInfo}
+                  onDismissEnrich={() => {
+                    setEnrichState("idle");
+                    setEnrichResult(null);
+                    setEnrichError(null);
+                  }}
                   saveState={saveState}
                   onSave={() => void save()}
                 />
@@ -967,7 +1258,7 @@ export function Workspace() {
                   error={historyError}
                   onRefresh={() => void refreshHistory()}
                   onLoad={openHistoryItem}
-                  onDelete={deleteHistoryItem}
+                  onDelete={(id) => void deleteHistoryItem(id)}
                 />
               ) : null}
             </div>
@@ -1050,7 +1341,7 @@ function RestoredCard({
             {formatBytes(meta.sizeBytes)} · {item?.frameCount ?? 0} кадров в сессии
           </p>
           <p className="mt-2 rounded-lg border border-line-soft bg-void/50 px-3 py-2 text-[12.5px] leading-relaxed text-muted">
-            Видеофайл не загружен — из истории восстановлены метрики, палитра, планы и промпт.
+            Видеофайл не загружен — из базы восстановлены метрики, палитра, планы и промпт.
             Чтобы снять новые кадры, откройте исходник заново.
           </p>
         </div>

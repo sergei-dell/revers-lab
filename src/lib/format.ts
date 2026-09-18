@@ -15,32 +15,55 @@ export function formatBytes(bytes: number): string {
   return `${value.toFixed(value >= 100 || i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
+// Соотношения, которые понимают генераторы видео. Любой кадр приводится к
+// ближайшему из них: «0.81:1» ни одна модель не примет.
 const RATIOS: Array<[number, number, string]> = [
-  [16, 9, "16:9"],
   [9, 16, "9:16"],
-  [4, 3, "4:3"],
   [3, 4, "3:4"],
-  [21, 9, "21:9"],
   [1, 1, "1:1"],
-  [2.39, 1, "2.39:1"],
-  [1.85, 1, "1.85:1"],
+  [4, 3, "4:3"],
+  [16, 9, "16:9"],
 ];
 
 export function aspectLabel(w: number, h: number): string {
   if (!w || !h) return "—";
-  const r = w / h;
+  // Сравниваем в логарифмах: 9:16 и 16:9 должны быть одинаково «далеки» от 1:1.
+  const r = Math.log(w / h);
   let best = RATIOS[0];
   let bestDiff = Infinity;
   for (const entry of RATIOS) {
-    const target = entry[0] / entry[1];
-    const diff = Math.abs(r - target) / target;
+    const diff = Math.abs(r - Math.log(entry[0] / entry[1]));
     if (diff < bestDiff) {
       bestDiff = diff;
       best = entry;
     }
   }
-  if (bestDiff > 0.06) return `${r.toFixed(2)}:1`;
   return best[2];
+}
+
+// ТЕГИ. Разбирает строки и списки тегов, убирает пустые и повторы без учёта
+// регистра — первое написание сохраняется. Внутри одного промпта теги
+// всегда уникальны.
+export function uniqueTags(...sources: Array<string | string[] | undefined | null>): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const source of sources) {
+    if (!source) continue;
+    const parts = Array.isArray(source) ? source : source.split(/[,;]/);
+    for (const part of parts) {
+      const tag = part.trim().replace(/\s+/g, " ");
+      if (!tag) continue;
+      const key = tag.toLocaleLowerCase("ru");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(tag);
+    }
+  }
+  return out;
+}
+
+export function mergeTags(...sources: Array<string | string[] | undefined | null>): string {
+  return uniqueTags(...sources).join(", ");
 }
 
 export function rgbToHex(r: number, g: number, b: number): string {

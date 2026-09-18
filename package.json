@@ -1,5 +1,5 @@
 {
-  "name": "revers-lab",
+  "name": "nextjs-postgresql-template",
   "private": true,
   "scripts": {
     "dev": "next dev",

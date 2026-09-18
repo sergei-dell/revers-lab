@@ -1,7 +1,8 @@
 import { CAMERA_LABELS } from "@/lib/video/analyze";
+import { uniqueTags } from "@/lib/format";
 import type { Analysis, PromptBundle, VideoMeta } from "@/lib/types";
 
-export type StylePreset = "cinema" | "commercial" | "anime" | "doc" | "vhs" | "none";
+export type StylePreset = "cinema" | "commercial" | "anime" | "doc" | "vhs" | "seedance" | "none";
 
 export const STYLE_PRESETS: Array<{
   id: StylePreset;
@@ -44,6 +45,13 @@ export const STYLE_PRESETS: Array<{
     hint: "трекинг-шум, хроматика",
     ru: "VHS-эстетика 90-х, хроматические аберрации, трекинг-шум, выцветшая плёнка",
     en: "1990s VHS aesthetic, chromatic aberration, tracking noise, faded tape",
+  },
+  {
+    id: "seedance",
+    label: "Seedance 2.5",
+    hint: "формат Seedance: живая камера и флаги --ar/--duration",
+    ru: "видеоролик Seedance 2.5, живая операторская камера, плавное естественное движение, чистая кинематографичная картинка",
+    en: "Seedance 2.5 video, live-action handheld-to-smooth camera work, natural motion, clean cinematic image",
   },
   {
     id: "none",
@@ -174,11 +182,49 @@ function subjectPhrase(tags: string) {
       ru: "объект съёмки не указан — добавьте теги, чтобы описать, что в кадре",
       en: "subject unspecified — add tags describing what is on screen",
     };
-  const list = clean
-    .split(/[,;]/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const list = uniqueTags(clean);
   return { ru: list.join(", "), en: list.join(", ") };
+}
+
+export function durationFlag(durationSec: number, preset: StylePreset): number {
+  const seconds = Math.round(durationSec || 5);
+  if (preset === "seedance") return Math.max(3, Math.min(12, seconds));
+  return Math.max(1, seconds);
+}
+
+/*  БЛОК ЗАМЕРОВ для режима «модель + замеры»: то, что модель по кадрам
+    не измерит — точные коды палитры, разобранное движение камеры,
+    число планов и зерно.                                            */
+export function measurementLines(a: Analysis, meta: VideoMeta): { ru: string; en: string } {
+  const palette = a.palette.slice(0, 7);
+  const paletteRu = palette.map((p) => `${p.nameRu} ${p.hex}`).join(", ") || "нейтральная";
+  const paletteEn = palette.map((p) => `${p.name} ${p.hex}`).join(", ") || "neutral";
+  const camera = CAMERA_LABELS[a.camera];
+  const confidence = Math.round(a.cameraConfidence * 100);
+  const cuts =
+    a.scenes.length > 1
+      ? { ru: `${a.scenes.length} плана, жёсткие склейки`, en: `${a.scenes.length} shots, hard cuts` }
+      : { ru: "один непрерывный дубль", en: "one continuous take" };
+  const grainRu = a.grain > 0.035 ? `плёночное зерно ${(a.grain * 100).toFixed(1)}%` : `чистая цифра, зерно ${(a.grain * 100).toFixed(1)}%`;
+  const grainEn = a.grain > 0.035 ? `film grain ${(a.grain * 100).toFixed(1)}%` : `clean digital, grain ${(a.grain * 100).toFixed(1)}%`;
+  const motionRu = `движение ${(a.motionMean * 100).toFixed(1)}%, дрожание ${(a.motionShake * 100).toFixed(1)}%`;
+  const motionEn = `motion ${(a.motionMean * 100).toFixed(1)}%, shake ${(a.motionShake * 100).toFixed(1)}%`;
+  return {
+    ru: [
+      `Палитра: ${paletteRu}.`,
+      `Камера: ${camera.ru} (${confidence}% уверенности), ${motionRu}.`,
+      `Монтаж: ${cuts.ru}.`,
+      `Фактура: ${grainRu}, детализация ${(a.edges * 100).toFixed(1)}%.`,
+      `Съёмка: ${meta.width}×${meta.height} (${meta.aspect}), ${meta.durationSec.toFixed(1)} с, ${meta.fps} к/с.`,
+    ].join("\n"),
+    en: [
+      `Palette: ${paletteEn}.`,
+      `Camera: ${camera.en} (${confidence}% confidence), ${motionEn}.`,
+      `Editing: ${cuts.en}.`,
+      `Texture: ${grainEn}, detail ${(a.edges * 100).toFixed(1)}%.`,
+      `Source: ${meta.width}x${meta.height} (${meta.aspect}), ${meta.durationSec.toFixed(1)}s, ${meta.fps} fps.`,
+    ].join("\n"),
+  };
 }
 
 export function buildPrompt(input: {
@@ -189,7 +235,12 @@ export function buildPrompt(input: {
 }): PromptBundle {
   const { analysis: a, meta, tags = "", preset = "cinema" } = input;
   const style = STYLE_PRESETS.find((p) => p.id === preset) ?? STYLE_PRESETS[0];
-  const subject = subjectPhrase(tags);
+  // Тег, совпадающий с названием пресета, уже сказан в описании стиля.
+  const subject = subjectPhrase(
+    uniqueTags(tags)
+      .filter((t) => style.id === "none" || t.toLocaleLowerCase("ru") !== style.label.toLocaleLowerCase("ru"))
+      .join(", "),
+  );
   const light = lightingPhrase(a);
   const grade = gradePhrase(a);
   const texture = texturePhrase(a);
@@ -203,6 +254,10 @@ export function buildPrompt(input: {
       ? { ru: `${a.scenes.length} отдельных плана с жёсткими склейками`, en: `${a.scenes.length} distinct shots with hard cuts` }
       : { ru: "один непрерывный дубль", en: "one continuous take" };
   const ar = /^\d+(\.\d+)?:\d+$/.test(meta.aspect) ? `--ar ${meta.aspect}` : "--ar 16:9";
+  /*  Длительность отдельным флагом нужна всем видеомоделям, поэтому
+      флаги идут в любом промпте. У Seedance 2.5 длина ограничена, у
+      остальных берётся как есть, целыми секундами.                   */
+  const flags = `${ar} --duration ${durationFlag(meta.durationSec, style.id)}`;
 
   const tech = {
     ru: `${meta.width}×${meta.height} (${meta.aspect}), ${meta.durationSec.toFixed(1)} с, ${meta.fps} к/с`,
@@ -217,7 +272,7 @@ export function buildPrompt(input: {
     `Движение: ${motion.ru}.`,
     `Монтаж: ${shotWord.ru}.`,
     `Настроение: ${mood.ru}.`,
-    `Технические параметры: ${tech.ru}.`,
+    `Технические параметры: ${tech.ru}. ${flags}`,
   ];
   const enParts = [
     `${style.en ? `${style.en}. ` : ""}${subject.en}.`,
@@ -227,10 +282,10 @@ export function buildPrompt(input: {
     `Motion: ${motion.en}.`,
     `Editing: ${shotWord.en}.`,
     `Mood: ${mood.en}.`,
-    `Technical: ${tech.en}. ${ar}`,
+    `Technical: ${tech.en}. ${flags}`,
   ];
 
-  const tagSet = new Set<string>([
+  const tagSet = uniqueTags([
     style.id !== "none" ? style.label.toLowerCase() : "",
     CAMERA_LABELS[a.camera].en,
     a.exposure === "low-key" ? "low-key" : a.exposure === "high-key" ? "high-key" : "mid-tone",
@@ -242,7 +297,7 @@ export function buildPrompt(input: {
     ...a.dominantHues.slice(0, 2),
     meta.aspect,
   ]);
-  const cleanTags = [...tagSet].filter((t) => t && t.length > 1);
+  const cleanTags = tagSet.filter((t) => t.length > 1);
 
   const headline = `${subject.ru.split(",")[0].slice(0, 46) || "Без названия"} · ${CAMERA_LABELS[a.camera].ru}`;
 
@@ -256,6 +311,7 @@ export function buildPrompt(input: {
       duration_sec: Number(meta.durationSec.toFixed(3)),
       fps: meta.fps,
       source_file: meta.fileName,
+      flags,
     },
     lighting: {
       key: a.exposure,
