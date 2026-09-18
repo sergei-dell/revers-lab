@@ -1,6 +1,5 @@
-import { sql } from "drizzle-orm";
-import { db } from "@/db";
 import { Workspace } from "@/components/Workspace";
+import { STATIC_BUILD } from "@/lib/staticMode";
 import {
   ApertureMark,
   IconBolt,
@@ -11,8 +10,6 @@ import {
   IconSplit,
   IconWave,
 } from "@/components/icons";
-
-export const dynamic = "force-dynamic";
 
 const CAPABILITIES = [
   {
@@ -82,18 +79,7 @@ const OUTPUTS = [
   "clip_A-B.webm",
 ];
 
-async function checkDb(): Promise<boolean> {
-  try {
-    await db.execute(sql`select 1`);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export default async function Page() {
-  const dbOnline = await checkDb();
-
+export default function Page() {
   return (
     <div className="relative min-h-screen overflow-x-hidden">
       {/* ambient background */}
@@ -131,20 +117,16 @@ export default async function Page() {
               <IconSheet width={12} height={12} />
               декодер в браузере
             </span>
-            <span
-              className={`chip ${dbOnline ? "border-good/35 text-good" : "border-bad/40 text-bad"}`}
-            >
-              <span
-                className={`h-1.5 w-1.5 rounded-full ${dbOnline ? "animate-pulse-dot bg-good text-good" : "bg-bad text-bad"}`}
-              />
-              {dbOnline ? "PostgreSQL online" : "PostgreSQL offline"}
+            <span className="chip border-good/35 text-good">
+              <span className="h-1.5 w-1.5 rounded-full animate-pulse-dot bg-good text-good" />
+              {STATIC_BUILD ? "без сервера" : "анализ в браузере"}
             </span>
           </div>
         </div>
       </header>
 
       <main className="mx-auto w-full max-w-[1420px] px-4 pb-14 pt-5 sm:px-6">
-        <Workspace dbOnline={dbOnline} />
+        <Workspace />
 
         <section className="mt-8">
           <div className="flex flex-wrap items-end justify-between gap-3">

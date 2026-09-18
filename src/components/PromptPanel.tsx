@@ -11,6 +11,7 @@ import {
 import { Segmented } from "@/components/ui";
 import { ENRICH_FRAME_OPTIONS, type EnrichFrameCount, type FrameLimitInfo } from "@/lib/enrichOptions";
 import { copyText, mergeTags } from "@/lib/format";
+import { STATIC_BUILD } from "@/lib/staticMode";
 import { STYLE_PRESETS, type StylePreset } from "@/lib/prompt";
 import type { PromptBundle } from "@/lib/types";
 
@@ -280,6 +281,23 @@ export function PromptPanel({
       ) : null}
 
       {/* ---------- AI enrichment ---------- */}
+      {STATIC_BUILD ? (
+        <div className="panel-flat p-3.5">
+          <div className="flex items-center gap-2">
+            <span className="text-flare">
+              <IconBolt width={15} height={15} />
+            </span>
+            <p className="font-display text-[12.5px] font-bold uppercase tracking-[0.09em] text-chalk">
+              Усиление нейросетью
+            </p>
+          </div>
+          <p className="mt-2 text-[12px] leading-relaxed text-muted">
+            В этой версии описания сцены нейросетью нет: страница работает без сервера, а ключ
+            модели в браузер отдавать нельзя. Весь остальной разбор — свет, цвет, оптика,
+            движение камеры, монтаж, промпт и кадры — считается прямо здесь.
+          </p>
+        </div>
+      ) : (
       <div className="panel-flat p-3.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
@@ -459,6 +477,7 @@ export function PromptPanel({
           </div>
         ) : null}
       </div>
+      )}
     </div>
   );
 }

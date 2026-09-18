@@ -41,7 +41,9 @@ import {
   type EnrichFrameCount,
   type FrameLimitInfo,
 } from "@/lib/enrichOptions";
+import { readHistory, writeHistory } from "@/lib/localHistory";
 import { createChoiceStore, useChoice } from "@/lib/prefs";
+import { STATIC_BUILD } from "@/lib/staticMode";
 import { analysisFromRow, toStoredMetrics } from "@/lib/store";
 import type {
   Analysis,
@@ -104,7 +106,7 @@ const TABS: Array<{ id: Tab; label: string; icon: ReactNode }> = [
   { id: "history", label: "История", icon: <IconHistory width={14} height={14} /> },
 ];
 
-export function Workspace({ dbOnline }: { dbOnline: boolean }) {
+export function Workspace() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const objectUrlRef = useRef<string | null>(null);
   const thumbRef = useRef<string | null>(null);
@@ -167,6 +169,7 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
       каждой смене числа. Не ответил — предел неизвестен, кнопку не прячем:
       сервер всё равно проверит перед отправкой.                       */
   useEffect(() => {
+    if (STATIC_BUILD) return;
     const controller = new AbortController();
     fetch(`/api/enrich?frames=${frameCount}`, { signal: controller.signal })
       .then((res) => (res.ok ? (res.json() as Promise<FrameLimitInfo>) : null))
@@ -215,10 +218,15 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
     setHistoryLoading(true);
     setHistoryError(null);
     try {
-      const res = await fetch("/api/analyses?limit=30", { cache: "no-store" });
-      const data = (await res.json()) as { items?: HistoryItem[]; error?: string };
-      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
-      setHistory(data.items ?? []);
+      // Со статической сборки сервера нет: история живёт в памяти браузера.
+      if (STATIC_BUILD) {
+        setHistory(readHistory());
+      } else {
+        const res = await fetch("/api/analyses?limit=30", { cache: "no-store" });
+        const data = (await res.json()) as { items?: HistoryItem[]; error?: string };
+        if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+        setHistory(data.items ?? []);
+      }
     } catch (e) {
       setHistoryError(e instanceof Error ? e.message : "Не удалось получить историю");
     } finally {
@@ -796,6 +804,43 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
         tags.trim().split(/[,;]/)[0].trim().slice(0, 70) ||
         meta.fileName.replace(/\.[^.]+$/, "").slice(0, 70) ||
         "Клип";
+      if (STATIC_BUILD) {
+        const item: HistoryItem = {
+          id: uid("h"),
+          title,
+          fileName: meta.fileName,
+          source: meta.source,
+          durationSec: meta.durationSec.toFixed(3),
+          width: meta.width,
+          height: meta.height,
+          fps: meta.fps.toFixed(2),
+          sizeBytes: meta.sizeBytes,
+          subjectTags: tags,
+          promptRu: draftRu || bundle.ru,
+          promptEn: draftEn || bundle.en,
+          negativePrompt: bundle.negative,
+          structured: bundle.structured,
+          metrics: toStoredMetrics(analysis),
+          palette: analysis.palette,
+          scenes: analysis.scenes,
+          frameCount: shots.length,
+          thumb: thumbRef.current,
+          createdAt: new Date().toISOString(),
+        };
+        const { saved, dropped } = writeHistory([item, ...readHistory()]);
+        setHistory(saved);
+        setHistoryError(null);
+        setSaveState("saved");
+        setSavedId(item.id);
+        pushToast(
+          "success",
+          "Сохранено в историю",
+          dropped
+            ? `Память браузера заполнена — удалено старых записей: ${dropped}`
+            : "Запись хранится в этом браузере",
+        );
+        return;
+      }
       const res = await fetch("/api/analyses", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -878,10 +923,14 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
       const previous = history;
       setHistory((prev) => prev.filter((h) => h.id !== id));
       try {
-        const res = await fetch(`/api/analyses/${id}`, { method: "DELETE" });
-        if (!res.ok) {
-          const data = (await res.json().catch(() => ({}))) as { error?: string };
-          throw new Error(data.error ?? `HTTP ${res.status}`);
+        if (STATIC_BUILD) {
+          setHistory(writeHistory(readHistory().filter((h) => h.id !== id)).saved);
+        } else {
+          const res = await fetch(`/api/analyses/${id}`, { method: "DELETE" });
+          if (!res.ok) {
+            const data = (await res.json().catch(() => ({}))) as { error?: string };
+            throw new Error(data.error ?? `HTTP ${res.status}`);
+          }
         }
         if (savedId === id) {
           setSavedId(null);
@@ -1207,7 +1256,6 @@ export function Workspace({ dbOnline }: { dbOnline: boolean }) {
                   items={history}
                   loading={historyLoading}
                   error={historyError}
-                  dbOnline={dbOnline}
                   onRefresh={() => void refreshHistory()}
                   onLoad={openHistoryItem}
                   onDelete={(id) => void deleteHistoryItem(id)}

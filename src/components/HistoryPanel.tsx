@@ -3,6 +3,7 @@
 import { IconAlert, IconHistory, IconPlay, IconTrash } from "@/components/icons";
 import { EmptyNote } from "@/components/ui";
 import { formatBytes, formatTime } from "@/lib/format";
+import { STATIC_BUILD } from "@/lib/staticMode";
 import type { HistoryItem } from "@/lib/types";
 
 function dateLabel(iso: string): string {
@@ -20,7 +21,6 @@ export function HistoryPanel({
   items,
   loading,
   error,
-  dbOnline,
   onRefresh,
   onLoad,
   onDelete,
@@ -28,7 +28,6 @@ export function HistoryPanel({
   items: HistoryItem[];
   loading: boolean;
   error: string | null;
-  dbOnline: boolean;
   onRefresh: () => void;
   onLoad: (item: HistoryItem) => void;
   onDelete: (id: string) => void;
@@ -41,10 +40,15 @@ export function HistoryPanel({
           {items.length} записей
         </span>
         <span
-          className={`chip ${dbOnline ? "border-good/35 text-good" : "border-bad/40 text-bad"}`}
+          className="chip"
+          title={
+            STATIC_BUILD
+              ? "История хранится только в этом браузере на этом устройстве"
+              : "История хранится в PostgreSQL на сервере"
+          }
         >
-          <span className={`h-1.5 w-1.5 rounded-full ${dbOnline ? "bg-good" : "bg-bad"}`} />
-          {dbOnline ? "PostgreSQL на связи" : "база недоступна"}
+          <span className="h-1.5 w-1.5 rounded-full bg-good" />
+          {STATIC_BUILD ? "в этом браузере" : "в базе"}
         </span>
         <button
           type="button"
@@ -81,7 +85,10 @@ export function HistoryPanel({
       {!loading && !items.length && !error ? (
         <EmptyNote>
           История пуста. Как только вы проанализируете видео и нажмёте «В историю», запись
-          с метриками, палитрой, промптом и миниатюрой ляжет в PostgreSQL.
+          с метриками, палитрой, промптом и миниатюрой{" "}
+          {STATIC_BUILD
+            ? "сохранится в памяти этого браузера — на другом устройстве её не будет."
+            : "ляжет в PostgreSQL."}
         </EmptyNote>
       ) : null}
 

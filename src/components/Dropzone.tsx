@@ -11,6 +11,7 @@ import {
   IconUpload,
 } from "@/components/icons";
 import { formatBytes } from "@/lib/format";
+import { STATIC_BUILD } from "@/lib/staticMode";
 
 const ACCEPTED_EXT = [".mp4", ".webm", ".mov", ".m4v", ".ogv", ".ogg", ".mkv", ".avi"];
 const MAX_BYTES = 800 * 1024 * 1024;
@@ -178,6 +179,9 @@ export function Dropzone({
               />
             </div>
 
+            {/*  Ссылку качает серверный прокси: в статической сборке его нет,
+                 и поле пришлось бы оставить нерабочим.                    */}
+            {STATIC_BUILD ? null : (
             <div className="mt-3 flex flex-col gap-2 sm:flex-row">
               <div className="relative flex-1">
                 <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-dim">
@@ -201,6 +205,7 @@ export function Dropzone({
                 Загрузить по ссылке
               </button>
             </div>
+            )}
 
             {error ? (
               <div className="animate-rise mt-3 flex items-start gap-2.5 rounded-lg border border-bad/40 bg-bad/8 px-3 py-2.5">
@@ -240,11 +245,12 @@ export function Dropzone({
           </ol>
           <div className="mt-2 rounded-xl border border-line-soft bg-void/60 p-3.5">
             <p className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-dim">
-              Что попадает в базу
+              {STATIC_BUILD ? "Что сохраняется в историю" : "Что попадает в базу"}
             </p>
             <p className="mt-1.5 text-[12.5px] leading-relaxed text-muted">
-              Только метаданные, метрики, палитра, промпт и миниатюра 320 px. Сам файл и
-              полноразмерные кадры остаются у вас в браузере.
+              Только метаданные, метрики, палитра, промпт и миниатюра 320 px
+              {STATIC_BUILD ? " — в памяти этого браузера" : ""}. Сам файл и полноразмерные
+              кадры остаются у вас в браузере.
             </p>
           </div>
         </div>
