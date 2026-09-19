@@ -43,6 +43,7 @@ import {
 } from "@/lib/enrichOptions";
 import { readHistory, writeHistory } from "@/lib/localHistory";
 import { createChoiceStore, useChoice } from "@/lib/prefs";
+import { buildTemplatePrompt } from "@/lib/templatePrompt";
 import { STATIC_BUILD } from "@/lib/staticMode";
 import { analysisFromRow, toStoredMetrics } from "@/lib/store";
 import type {
@@ -77,7 +78,11 @@ const MEASURED_HEAD = "— измерено движком:";
 
 // Последний выбранный режим заполнения промпта живёт в памяти браузера.
 const APPLY_MODE_KEY = "revers-lab.apply-mode.v1";
-const applyModeStore = createChoiceStore<ApplyMode>(APPLY_MODE_KEY, ["model", "both", "metrics"], "model");
+const applyModeStore = createChoiceStore<ApplyMode>(
+  APPLY_MODE_KEY,
+  ["model", "both", "metrics", "template"],
+  "model",
+);
 
 // Сколько кадров уходит модели — тоже помнится между заходами.
 const frameCountStore = createChoiceStore<EnrichFrameCount>(
@@ -746,6 +751,12 @@ export function Workspace() {
         ru: data.ru ?? "",
         en: data.en ?? "",
         tags: data.tags ?? [],
+        subject: data.subject ?? "",
+        environment: data.environment ?? "",
+        camera: data.camera ?? "",
+        light: data.light ?? "",
+        color: data.color ?? "",
+        texture: data.texture ?? "",
         replacements: data.replacements ?? [],
         negative: data.negative ?? "",
         action: data.action ?? [],
@@ -801,7 +812,19 @@ export function Workspace() {
         }
 
         const measured = analysis && meta ? measurementLines(analysis, meta) : null;
-        const build = (local: string, ai: string, measures: string) => {
+        /*  ШАБЛОН СО СЛОТАМИ собирается отдельным сборщиком: у него своя
+            структура, а не промпт одной простынёй.                     */
+        const template =
+          mode === "template" && enrichResult
+            ? buildTemplatePrompt({
+                answer: enrichResult,
+                analysis,
+                meta,
+                flags: (bundle.ru.match(/--ar \S+ --duration \d+/) ?? [])[0] ?? "",
+              })
+            : null;
+        const build = (local: string, ai: string, measures: string, шаблон: string) => {
+          if (mode === "template") return шаблон || local;
           if (mode === "metrics") return local;
           const head = ai.trim();
           if (!head) return local;
@@ -809,8 +832,8 @@ export function Workspace() {
           return withFlags(body, local);
         };
 
-        const ru = build(bundle.ru, enrichResult?.ru ?? "", measured?.ru ?? "");
-        const en = build(bundle.en, enrichResult?.en ?? "", measured?.en ?? "");
+        const ru = build(bundle.ru, enrichResult?.ru ?? "", measured?.ru ?? "", template?.ru ?? "");
+        const en = build(bundle.en, enrichResult?.en ?? "", measured?.en ?? "", template?.en ?? "");
         const прежний = lang === "ru" ? draftRu : draftEn;
         const новый = lang === "ru" ? ru : en;
 
@@ -832,7 +855,9 @@ export function Workspace() {
           текстИзменился: новый !== прежний,
         });
 
-        if (mode === "both" && !measured) {
+        if (mode === "template" && !template) {
+          pushToast("error", "Шаблон не собрался", "Нужен ответ модели: нажмите «Описать кадры моделью»");
+        } else if (mode === "both" && !measured) {
           pushToast("error", "Замеры не готовы", "Подставлено только описание модели");
         } else if (новый === прежний) {
           pushToast(
@@ -844,6 +869,9 @@ export function Workspace() {
           );
         } else if (mode === "metrics") {
           pushToast("success", "Промпт собран из измерений");
+        } else if (mode === "template" && template) {
+          const слотов = [/ГЕРОЯ/, /ПРОДУКТА/, /ЛОКАЦИИ/].filter((с) => с.test(template.ru)).length;
+          pushToast("success", "Шаблон со слотами собран", `Слотов в кадре: ${слотов}`);
         } else if (mode === "both" && measured) {
           pushToast("success", "Описание модели и замеры вместе", `Строк замеров: ${measured.ru.split("\n").length}`);
         } else {

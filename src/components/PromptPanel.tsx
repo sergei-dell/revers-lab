@@ -19,7 +19,7 @@ type View = "prompt" | "json" | "negative";
 export type EnrichState = "idle" | "loading" | "done" | "error";
 
 // Чем заполнять окно промпта по кнопке.
-export type ApplyMode = "model" | "both" | "metrics";
+export type ApplyMode = "model" | "both" | "metrics" | "template";
 
 export const APPLY_MODES: Array<{ id: ApplyMode; label: string; hint: string }> = [
   { id: "model", label: "Только модель", hint: "описание сцены от нейросети" },
@@ -29,6 +29,11 @@ export const APPLY_MODES: Array<{ id: ApplyMode; label: string; hint: string }> 
     hint: "описание сцены плюс палитра с кодами, движение камеры, монтаж и зерно",
   },
   { id: "metrics", label: "Только замеры", hint: "промпт из измерений, как до нейросети" },
+  {
+    id: "template",
+    label: "Шаблон со слотами",
+    hint: "промпт под съёмку с референсами: [ФОТО ГЕРОЯ], [ФОТО ПРОДУКТА], [ФОТО ЛОКАЦИИ], таймлайн планов",
+  },
 ];
 
 // Что возвращает /api/enrich: готовый промпт, теги и разбор по частям.
@@ -36,6 +41,13 @@ export type EnrichAnswer = {
   ru: string;
   en: string;
   tags: string[];
+  /*  Разбор по частям — из него собирается «Шаблон со слотами».   */
+  subject: string;
+  environment: string;
+  camera: string;
+  light: string;
+  color: string;
+  texture: string;
   replacements: Array<{ from: string; to: string }>;
   negative: string;
   action: Array<{ t: string; beat: string }>;
@@ -508,6 +520,16 @@ export function PromptPanel({
               <p className="mt-1.5 text-[11.5px] leading-snug text-dim">
                 Флаги --ar и --duration добавляются в любом режиме. Выбранный режим запомнится.
               </p>
+              {applyMode === "template" ? (
+                <button
+                  type="button"
+                  className="btn mt-2 px-3 py-1.5 text-[12px]"
+                  title="Скопировать английскую версию шаблона со слотами"
+                  onClick={() => copy(draftEn, "шаблон")}
+                >
+                  {copied === "шаблон" ? "Скопировано" : "Копировать шаблон"}
+                </button>
+              ) : null}
             </div>
 
             <div className="flex flex-wrap gap-2">
