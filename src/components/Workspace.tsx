@@ -72,6 +72,9 @@ import { readContainerFps } from "@/lib/video/containerFps";
 
 type Phase = "idle" | "decoding" | "probing" | "analyzing" | "ready";
 
+// Заголовок блока замеров: по нему же окно промпта находит, куда прокрутить.
+const MEASURED_HEAD = "— измерено движком:";
+
 // Последний выбранный режим заполнения промпта живёт в памяти браузера.
 const APPLY_MODE_KEY = "revers-lab.apply-mode.v1";
 const applyModeStore = createChoiceStore<ApplyMode>(APPLY_MODE_KEY, ["model", "both", "metrics"], "model");
@@ -157,6 +160,9 @@ export function Workspace() {
   const applyMode = useChoice(applyModeStore);
   const frameCount = useChoice(frameCountStore);
   const [frameLimitInfo, setFrameLimitInfo] = useState<FrameLimitInfo | null>(null);
+  /*  Куда прокрутить окно промпта после подстановки: доля от начала текста
+      и ключ, чтобы прокрутка срабатывала и на повторное нажатие.        */
+  const [scrollHint, setScrollHint] = useState<{ share: number; key: number } | null>(null);
   const [enrichError, setEnrichError] = useState<string | null>(null);
 
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -773,25 +779,36 @@ export function Workspace() {
         if (mode === "metrics") return local;
         const head = ai.trim();
         if (!head) return local;
-        const body = mode === "both" && measures ? `${head}\n\n— измерено движком:\n${measures}` : head;
+        const body = mode === "both" && measures ? `${head}\n\n${MEASURED_HEAD}\n${measures}` : head;
         return withFlags(body, local);
       };
 
-      setDraftRu(build(bundle.ru, enrichResult?.ru ?? "", measured?.ru ?? ""));
+      const ru = build(bundle.ru, enrichResult?.ru ?? "", measured?.ru ?? "");
+      setDraftRu(ru);
       setDraftEn(build(bundle.en, enrichResult?.en ?? "", measured?.en ?? ""));
       setDirty(true);
       setLang("ru");
       setView("prompt");
+      /*  Ответ модели — это три-пять предложений, и блок замеров уходит вниз,
+          за край окна промпта: первый экран получался буква в букву как в
+          режиме «только модель», и казалось, что замеры не подставились.
+          Поэтому окно само прокручивается к началу блока.               */
+      const mark = ru.indexOf(MEASURED_HEAD);
+      setScrollHint(mark >= 0 && ru.length ? { share: mark / ru.length, key: Date.now() } : null);
+      if (mode === "both" && !measured) {
+        pushToast("error", "Замеры не готовы", "Подставлено только описание модели");
+      }
       if (mode !== "metrics" && enrichResult?.tags.length) {
         setTags((prev) => mergeTags(prev, enrichResult.tags));
       }
-      const said =
-        mode === "metrics"
-          ? "Промпт собран из измерений"
-          : mode === "both"
-            ? "Описание модели и замеры вместе"
-            : "Описание модели подставлено";
-      pushToast("success", said);
+      if (mode === "metrics") {
+        pushToast("success", "Промпт собран из измерений");
+      } else if (mode === "both" && measured) {
+        const строк = measured.ru.split("\n").length;
+        pushToast("success", "Описание модели и замеры вместе", `Ниже описания добавлено строк замеров: ${строк}`);
+      } else if (mode === "model") {
+        pushToast("success", "Описание модели подставлено");
+      }
     },
     [analysis, bundle, enrichResult, meta, pushToast],
   );
@@ -1191,6 +1208,7 @@ export function Workspace() {
                   frameCount={frameCount}
                   onFrameCountChange={(n) => frameCountStore.save(n)}
                   frameLimit={frameLimitInfo}
+                  scrollHint={scrollHint}
                   onDismissEnrich={() => {
                     setEnrichState("idle");
                     setEnrichResult(null);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   IconBolt,
   IconCheck,
@@ -67,6 +67,7 @@ export function PromptPanel({
   frameCount,
   onFrameCountChange,
   frameLimit,
+  scrollHint,
   onDismissEnrich,
   saveState,
   onSave,
@@ -93,17 +94,42 @@ export function PromptPanel({
   frameCount: EnrichFrameCount;
   onFrameCountChange: (count: EnrichFrameCount) => void;
   frameLimit: FrameLimitInfo | null;
+  /** куда прокрутить окно промпта после подстановки */
+  scrollHint: { share: number; key: number } | null;
   onDismissEnrich: () => void;
   saveState: SaveState;
   onSave: () => void;
 }) {
   const [copied, setCopied] = useState<string | null>(null);
+  const area = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     if (!copied) return;
     const t = setTimeout(() => setCopied(null), 1800);
     return () => clearTimeout(t);
   }, [copied]);
+
+  /*  Показать то, что добавилось. Окно промпта невысокое: при ответе модели
+      в три-пять предложений блок замеров уходит ниже видимой части, и первый
+      экран выглядит точно как в режиме «только модель». Прокрутка повторяется
+      на следующем кадре: после подстановки идут ещё перерисовки (теги, язык),
+      и они возвращают окно наверх.                                        */
+  useEffect(() => {
+    if (!scrollHint) return;
+    const прокрутить = () => {
+      const узел = area.current;
+      if (!узел) return;
+      const цель = узел.scrollHeight * scrollHint.share - узел.clientHeight / 3;
+      узел.scrollTop = Math.max(0, Math.min(узел.scrollHeight, цель));
+    };
+    прокрутить();
+    const кадр = requestAnimationFrame(прокрутить);
+    const позже = setTimeout(прокрутить, 80);
+    return () => {
+      cancelAnimationFrame(кадр);
+      clearTimeout(позже);
+    };
+  }, [scrollHint]);
 
   if (!bundle) {
     return (
@@ -202,6 +228,7 @@ export function PromptPanel({
 
       <div className="relative">
         <textarea
+          ref={area}
           className={`field resize-y font-mono text-[12.5px] leading-relaxed ${
             view === "prompt" ? "min-h-[230px]" : "min-h-[230px] bg-void/70"
           }`}
