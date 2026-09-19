@@ -55,6 +55,7 @@ export function PromptPanel({
   tags,
   onTagsChange,
   draft,
+  draftEn,
   onDraftChange,
   onResetDraft,
   onDownload,
@@ -83,6 +84,8 @@ export function PromptPanel({
   tags: string;
   onTagsChange: (tags: string) => void;
   draft: string;
+  /** английская версия того, что собрано в текущем режиме — её копирует «Копировать EN» */
+  draftEn: string;
   onDraftChange: (value: string) => void;
   onResetDraft: () => void;
   onDownload: (kind: "txt" | "json") => void;
@@ -508,10 +511,13 @@ export function PromptPanel({
             </div>
 
             <div className="flex flex-wrap gap-2">
+              {/*  Копируем не голый ответ модели, а английскую версию того, что
+                   собрано выбранным режимом: с блоком замеров и с флагами. */}
               <button
                 type="button"
                 className="btn"
-                onClick={() => copy(enrichResult.en, "ai-en")}
+                title="Скопировать английскую версию промпта в выбранном режиме"
+                onClick={() => copy(draftEn || enrichResult.en, "ai-en")}
               >
                 {copied === "ai-en" ? "Скопировано" : "Копировать EN"}
               </button>

@@ -1240,6 +1240,7 @@ export function Workspace() {
                   tags={tags}
                   onTagsChange={setTags}
                   draft={draft}
+                  draftEn={draftEn}
                   onDraftChange={setDraft}
                   onResetDraft={() => {
                     setDirty(false);
