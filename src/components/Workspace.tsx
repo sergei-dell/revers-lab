@@ -12,7 +12,14 @@ import { Dropzone } from "@/components/Dropzone";
 import { FrameBoard, type ExtractMode } from "@/components/FrameBoard";
 import { HistoryPanel } from "@/components/HistoryPanel";
 import { MetricsPanel } from "@/components/MetricsPanel";
-import { PromptPanel, type ApplyMode, type EnrichAnswer, type EnrichState, type SaveState } from "@/components/PromptPanel";
+import {
+  PromptPanel,
+  type ApplyMode,
+  type EnrichAnswer,
+  type EnrichState,
+  type SaveState,
+  type SegmentResult,
+} from "@/components/PromptPanel";
 import { VideoStage, type ClipRange } from "@/components/VideoStage";
 import {
   IconAlert,
@@ -43,6 +50,7 @@ import {
 } from "@/lib/enrichOptions";
 import { readHistory, writeHistory } from "@/lib/localHistory";
 import { createChoiceStore, useChoice } from "@/lib/prefs";
+import { segmentLabel, splitIntoSegments, type Segment } from "@/lib/segments";
 import { buildTemplatePrompt } from "@/lib/templatePrompt";
 import { STATIC_BUILD } from "@/lib/staticMode";
 import { analysisFromRow, toStoredMetrics } from "@/lib/store";
@@ -72,6 +80,45 @@ import { analyzeVideo, CAMERA_LABELS } from "@/lib/video/analyze";
 import { readContainerFps } from "@/lib/video/containerFps";
 
 type Phase = "idle" | "decoding" | "probing" | "analyzing" | "ready";
+
+/*  СБОРКА ТЕКСТА РЕЖИМА — одна на всех: и для окна промпта, и для каждого
+    отрезка при разборе по кускам. Второй такой же сборки быть не должно:
+    разойдутся при первой правке.                                       */
+function собратьТекст(
+  mode: ApplyMode,
+  части: {
+    local: { ru: string; en: string };
+    answer: EnrichAnswer | null;
+    analysis: Analysis | null;
+    meta: VideoMeta | null;
+    style: { ru: string; en: string };
+    flags: string;
+  },
+): { ru: string; en: string } {
+  const { local, answer, analysis, meta, style, flags } = части;
+  // Промпт измерений тоже проходит через флаги: у отрезка своя длительность.
+  if (!answer) return local;
+  const measured = analysis && meta ? measurementLines(analysis, meta) : null;
+  const template =
+    mode === "template" ? buildTemplatePrompt({ answer, analysis, meta, flags, style }) : null;
+  const собрать = (язык: "ru" | "en") => {
+    if (mode === "metrics") return local[язык];
+    if (mode === "template") return template ? template[язык] : local[язык];
+    const head = answer[язык].trim();
+    if (!head) return local[язык];
+    const measures = measured ? measured[язык] : "";
+    const body = mode === "both" && measures ? `${head}\n\n${MEASURED_HEAD}\n${measures}` : head;
+    return withFlags(body, local[язык]);
+  };
+  /*  Флаги отрезка — его собственные: у куска в пять секунд не может
+      стоять длительность всего ролика.                              */
+  const сФлагами = (текст: string) => {
+    if (!flags) return текст;
+    const есть = /--ar \S+ --duration \d+/;
+    return есть.test(текст) ? текст.replace(есть, flags) : `${текст.trimEnd()}\n\n${flags}`;
+  };
+  return { ru: сФлагами(собрать("ru")), en: сФлагами(собрать("en")) };
+}
 
 // Заголовок блока замеров: по нему же окно промпта находит, куда прокрутить.
 const MEASURED_HEAD = "— измерено движком:";
@@ -171,6 +218,11 @@ export function Workspace() {
   /*  Чем закончилось последнее нажатие режима: окно промпта сверит это с
       тем, что реально лежит в поле, и скажет, если текст не доехал.   */
   const [applied, setApplied] = useState<{ mode: ApplyMode; length: number; key: number } | null>(null);
+  /*  РАЗБОР ПО ОТРЕЗКАМ: каждый кусок ролика описывается своим запросом,
+      у каждого свой промпт и своя кнопка копирования.                 */
+  const [bySegments, setBySegments] = useState(false);
+  const [segments, setSegments] = useState<SegmentResult[]>([]);
+  const [segmentProgress, setSegmentProgress] = useState<{ done: number; total: number } | null>(null);
   const [enrichError, setEnrichError] = useState<string | null>(null);
 
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -344,6 +396,7 @@ export function Workspace() {
       setEnrichState("idle");
       setEnrichResult(null);
       setEnrichError(null);
+      setSegments([]);
       setClip({ a: null, b: null });
       setFatal(null);
       setTab("prompt");
@@ -700,8 +753,132 @@ export function Workspace() {
     pushToast("success", "Отчёт выгружен");
   }, [analysis, bundle, draftEn, draftRu, meta, pushToast]);
 
+  /*  Кадры внутри отрезка: равномерно по нему, а не по всему ролику. */
+  const снятьКадры = useCallback(
+    async (от: number, до: number) => {
+      const кадры: string[] = [];
+      const v = videoRef.current;
+      if (v && sourceUrl) {
+        v.pause();
+        const длина = Math.max(0.05, до - от);
+        for (const доля of evenTimes(длина, frameCount)) {
+          const shot = await grabFrame(v, от + доля, "image/jpeg", 0.72, 640);
+          кадры.push(await blobToDataUrl(shot.blob));
+          URL.revokeObjectURL(shot.url);
+        }
+        v.currentTime = currentTime;
+      } else if (shots.length) {
+        const внутри = shots.filter((s) => s.time >= от && s.time <= до).sort((x, y) => x.time - y.time);
+        const список = внутри.length ? внутри : [...shots].sort((x, y) => x.time - y.time);
+        for (const s of spreadEvenly(список, frameCount)) кадры.push(await blobToDataUrl(s.blob));
+      } else if (thumbRef.current) {
+        кадры.push(thumbRef.current);
+      }
+      return кадры;
+    },
+    [currentTime, frameCount, shots, sourceUrl],
+  );
+
+  /*  Один запрос к модели. Для отрезка добавляем в задание его время —
+      иначе модель описывает ролик целиком, а не эту сцену.            */
+  const спроситьМодель = useCallback(
+    async (кадры: string[], про?: { segment: Segment; total: number }) => {
+      if (!bundle || !analysis) throw new Error("Разбор ещё не готов");
+      const задание = про
+        ? `Это отрезок ${про.segment.index + 1} из ${про.total}, время ${segmentLabel(про.segment)} ` +
+          `(с ${про.segment.start.toFixed(1)} по ${про.segment.end.toFixed(1)} секунду ролика). ` +
+          `Опиши ТОЛЬКО то, что происходит в этом отрезке, а не весь ролик.\n\n` +
+          JSON.stringify(bundle.structured, null, 2)
+        : JSON.stringify(bundle.structured, null, 2);
+      const res = await fetch("/api/enrich", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ frames: кадры, tags, summary: задание, metrics: toStoredMetrics(analysis) }),
+      });
+      const data = (await res.json()) as EnrichAnswer & {
+        error?: string;
+        timing?: { frames: number; requestKb: number; modelMs: number };
+      };
+      if (!res.ok) throw new Error(data.error ?? `Сервис описания ответил ${res.status}`);
+      if (!data.ru && !data.en) throw new Error("Пустой ответ модели");
+      return data;
+    },
+    [analysis, bundle, tags],
+  );
+
+  /*  РАЗБОР ПО ОТРЕЗКАМ. Каждый кусок — свой запрос к модели и свой
+      промпт; режим заполнения у всех один, выбранный человеком.      */
+  const описатьОтрезками = useCallback(async () => {
+    if (!analysis || !bundle || !meta) return;
+    const куски = splitIntoSegments(meta.durationSec);
+    setEnrichState("loading");
+    setEnrichError(null);
+    setSegments([]);
+    setSegmentProgress({ done: 0, total: куски.length });
+    const стиль = STYLE_PRESETS.find((p) => p.id === preset) ?? { ru: "", en: "" };
+    const флаги = (bundle.ru.match(/--ar \S+ --duration \d+/) ?? [])[0] ?? "";
+    const собранные: SegmentResult[] = [];
+    try {
+      for (const кусок of куски) {
+        const кадры = await снятьКадры(кусок.start, кусок.end);
+        if (!кадры.length) throw new Error("Нет кадров для отрезка");
+        const ответ = await спроситьМодель(кадры, { segment: кусок, total: куски.length });
+        const answer: EnrichAnswer = {
+          ru: ответ.ru ?? "",
+          en: ответ.en ?? "",
+          tags: ответ.tags ?? [],
+          subject: ответ.subject ?? "",
+          environment: ответ.environment ?? "",
+          camera: ответ.camera ?? "",
+          light: ответ.light ?? "",
+          color: ответ.color ?? "",
+          texture: ответ.texture ?? "",
+          replacements: ответ.replacements ?? [],
+          negative: ответ.negative ?? "",
+          action: ответ.action ?? [],
+        };
+        // Длительность в флагах — своя у каждого отрезка.
+        const метаОтрезка: VideoMeta = { ...meta, durationSec: кусок.end - кусок.start };
+        const флагиОтрезка = флаги.replace(/--duration \d+/, `--duration ${Math.max(1, Math.round(метаОтрезка.durationSec))}`);
+        const свой = { ru: bundle.ru, en: bundle.en };
+        собранные.push({
+          index: кусок.index,
+          label: segmentLabel(кусок),
+          start: кусок.start,
+          end: кусок.end,
+          answer,
+          prompt: собратьТекст(applyMode, {
+            local: свой,
+            answer,
+            analysis,
+            meta: метаОтрезка,
+            style: стиль,
+            flags: флагиОтрезка,
+          }),
+        });
+        setSegments([...собранные]);
+        setSegmentProgress({ done: собранные.length, total: куски.length });
+      }
+      setEnrichState("done");
+      pushToast("success", `Разобрано отрезков: ${собранные.length}`, "У каждого своё описание и свой промпт");
+    } catch (error) {
+      const текст = error instanceof Error ? error.message : "Неизвестная ошибка";
+      console.error("[отрезки] разбор прерван:", error);
+      setEnrichError(текст);
+      setEnrichState(собранные.length ? "done" : "error");
+      pushToast("error", "Разбор по отрезкам прерван", текст);
+    } finally {
+      setSegmentProgress(null);
+    }
+  }, [analysis, applyMode, bundle, meta, preset, pushToast, снятьКадры, спроситьМодель]);
+
   const enrich = useCallback(async () => {
     if (!analysis || !bundle) return;
+    if (bySegments) {
+      await описатьОтрезками();
+      return;
+    }
+    setSegments([]);
     setEnrichState("loading");
     setEnrichError(null);
     try {
@@ -775,7 +952,20 @@ export function Workspace() {
       setEnrichError(msg);
       setEnrichState("error");
     }
-  }, [analysis, bundle, currentTime, frameCount, frameLimitInfo, meta, pushToast, shots, sourceUrl, tags]);
+  }, [
+    analysis,
+    bundle,
+    bySegments,
+    currentTime,
+    frameCount,
+    frameLimitInfo,
+    meta,
+    описатьОтрезками,
+    pushToast,
+    shots,
+    sourceUrl,
+    tags,
+  ]);
 
   /*  ТРИ РЕЖИМА ЗАПОЛНЕНИЯ. «Только модель» — описание сцены; «модель +
       замеры» — описание плюс то, что модель по кадрам не измерит: коды
@@ -805,10 +995,36 @@ export function Workspace() {
           pushToast("error", "Разбор ещё не готов", "Дождитесь конца анализа или откройте видео заново");
           return;
         }
-        if (mode !== "metrics" && !enrichResult) {
+        if (mode !== "metrics" && !enrichResult && !segments.length) {
           скажем("ответа модели нет");
           pushToast("error", "Ответа модели нет", "Сначала нажмите «Описать кадры моделью»");
           return;
+        }
+
+        // Разобрано по отрезкам — режим меняет промпт каждого отрезка.
+        if (segments.length) {
+          const стиль = STYLE_PRESETS.find((p) => p.id === preset) ?? { ru: "", en: "" };
+          const флаги = (bundle.ru.match(/--ar \S+ --duration \d+/) ?? [])[0] ?? "";
+          setSegments((прежние) =>
+            прежние.map((отрезок) => {
+              // Длительность в флагах — своя у каждого отрезка, не всего ролика.
+              const длина = Math.max(1, Math.round(отрезок.end - отрезок.start));
+              return {
+                ...отрезок,
+                prompt: собратьТекст(mode, {
+                  local: { ru: bundle.ru, en: bundle.en },
+                  answer: отрезок.answer,
+                  analysis,
+                  meta: meta ? { ...meta, durationSec: отрезок.end - отрезок.start } : meta,
+                  style: стиль,
+                  flags: флаги.replace(/--duration \d+/, `--duration ${длина}`),
+                }),
+              };
+            }),
+          );
+          скажем("пересобраны промпты отрезков", { отрезков: segments.length });
+          pushToast("success", "Промпты отрезков пересобраны", `Отрезков: ${segments.length}`);
+          if (!enrichResult) return;
         }
 
         const measured = analysis && meta ? measurementLines(analysis, meta) : null;
@@ -884,7 +1100,7 @@ export function Workspace() {
         pushToast("error", "Режим не сработал", текст);
       }
     },
-    [analysis, bundle, draftEn, draftRu, enrichResult, lang, meta, preset, pushToast],
+    [analysis, bundle, draftEn, draftRu, enrichResult, lang, meta, preset, pushToast, segments],
   );
 
   const save = useCallback(async () => {
@@ -1290,6 +1506,11 @@ export function Workspace() {
                   frameLimit={frameLimitInfo}
                   scrollHint={scrollHint}
                   applied={applied}
+                  bySegments={bySegments}
+                  onBySegmentsChange={setBySegments}
+                  segmentCount={meta ? splitIntoSegments(meta.durationSec).length : 0}
+                  segments={segments}
+                  segmentProgress={segmentProgress}
                   onDismissEnrich={() => {
                     setEnrichState("idle");
                     setEnrichResult(null);

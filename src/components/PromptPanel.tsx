@@ -56,6 +56,28 @@ export type EnrichAnswer = {
 };
 export type SaveState = "idle" | "saving" | "saved" | "error";
 
+// Один отрезок разбора: своё время, своё описание, свой промпт.
+// «1 запрос, 2 запроса, 5 запросов» — иначе строка про цену выглядит
+// машинной именно там, где человек считает деньги.
+function запросов(n: number): string {
+  const сто = n % 100;
+  const десять = n % 10;
+  if (сто >= 11 && сто <= 14) return `${n} запросов`;
+  if (десять === 1) return `${n} запрос`;
+  if (десять >= 2 && десять <= 4) return `${n} запроса`;
+  return `${n} запросов`;
+}
+
+export type SegmentResult = {
+  index: number;
+  label: string;
+  /** границы отрезка в секундах: по ним пересобирается его промпт */
+  start: number;
+  end: number;
+  answer: EnrichAnswer;
+  prompt: { ru: string; en: string };
+};
+
 export function PromptPanel({
   bundle,
   lang,
@@ -82,6 +104,11 @@ export function PromptPanel({
   frameLimit,
   scrollHint,
   applied,
+  bySegments,
+  onBySegmentsChange,
+  segmentCount,
+  segments,
+  segmentProgress,
   onDismissEnrich,
   saveState,
   onSave,
@@ -114,6 +141,13 @@ export function PromptPanel({
   scrollHint: { share: number; key: number } | null;
   /** чем закончилось последнее нажатие режима — окно сверит это с собой */
   applied: { mode: ApplyMode; length: number; key: number } | null;
+  /** разбирать ролик целиком или по пятисекундным отрезкам */
+  bySegments: boolean;
+  onBySegmentsChange: (value: boolean) => void;
+  /** сколько отрезков выйдет — столько и запросов к модели */
+  segmentCount: number;
+  segments: SegmentResult[];
+  segmentProgress: { done: number; total: number } | null;
   onDismissEnrich: () => void;
   saveState: SaveState;
   onSave: () => void;
@@ -388,16 +422,54 @@ export function PromptPanel({
               ))}
               <span className="ml-0.5 font-mono text-[10.5px] uppercase tracking-[0.1em] text-dim">кадров</span>
             </div>
+            <div className="flex items-center gap-1" role="group" aria-label="Разбирать целиком или по отрезкам">
+              {[
+                { id: false, label: "весь ролик" },
+                { id: true, label: "по отрезкам" },
+              ].map((в) => (
+                <button
+                  key={String(в.id)}
+                  type="button"
+                  onClick={() => onBySegmentsChange(в.id)}
+                  disabled={enrichState === "loading"}
+                  title={
+                    в.id
+                      ? "Ролик делится на куски по 5 секунд, каждый описывается своим запросом"
+                      : "Один запрос на весь ролик"
+                  }
+                  className={`rounded-md border px-2.5 py-1 text-[11.5px] transition ${
+                    в.id === bySegments
+                      ? "border-ember/60 bg-ember/14 text-ember"
+                      : "border-line bg-void/50 text-muted hover:border-edge hover:text-chalk"
+                  }`}
+                >
+                  {в.label}
+                </button>
+              ))}
+            </div>
             <button
               type="button"
               className="btn px-3 py-1.5 text-[12px]"
               onClick={onEnrich}
               disabled={enrichState === "loading" || frameLimit?.fits === false}
             >
-              {enrichState === "loading" ? "Модель думает…" : "Описать кадры моделью"}
+              {enrichState === "loading"
+                ? segmentProgress
+                  ? `Отрезок ${segmentProgress.done + 1} из ${segmentProgress.total}…`
+                  : "Модель думает…"
+                : "Описать кадры моделью"}
             </button>
           </div>
         </div>
+
+        {bySegments && segmentCount > 1 ? (
+          <div className="mt-3 rounded-lg border border-warn/40 bg-warn/8 px-3 py-2.5">
+            <p className="text-[12.5px] leading-snug text-chalk/90">
+              По отрезкам это <b>{запросов(segmentCount)}</b> к модели вместо одного: ролик делится на куски
+              по 5 секунд, и каждый описывается отдельно. Кадров в каждом запросе — {frameCount}.
+            </p>
+          </div>
+        ) : null}
 
         {frameLimit?.fits === false && frameLimit.frames === frameCount && frameLimit.message ? (
           <div className="animate-rise mt-3 rounded-lg border border-warn/40 bg-warn/8 px-3 py-2.5">
@@ -426,6 +498,79 @@ export function PromptPanel({
             >
               Понятно, остаться на локальном анализе
             </button>
+          </div>
+        ) : null}
+
+        {/*  Выбор режима нужен и при разборе по отрезкам: он задаёт,
+             каким будет промпт каждого отрезка.                      */}
+        {enrichState === "done" && (enrichResult || segments.length) ? (
+          <div className="mt-3">
+          <div>
+            <p className="hud-label mb-1.5">Чем заполнить промпт</p>
+            <div className="flex flex-wrap gap-1.5">
+              {APPLY_MODES.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  title={m.hint}
+                  onClick={() => onApplyEnrich(m.id)}
+                  className={`rounded-lg border px-3 py-2 font-display text-[12px] font-semibold transition ${
+                    m.id === applyMode
+                      ? "border-ember/60 bg-ember/14 text-ember"
+                      : "border-line bg-void/50 text-muted hover:border-edge hover:text-chalk"
+                  }`}
+                >
+                  {m.id === applyMode ? <IconCheck width={13} height={13} className="mr-1 inline" /> : null}
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-[11.5px] leading-snug text-dim">
+              Флаги --ar и --duration добавляются в любом режиме. Выбранный режим запомнится.
+            </p>
+            {applyMode === "template" ? (
+              <button
+                type="button"
+                className="btn mt-2 px-3 py-1.5 text-[12px]"
+                title="Скопировать английскую версию шаблона со слотами"
+                onClick={() => copy(draftEn, "шаблон")}
+              >
+                {copied === "шаблон" ? "Скопировано" : "Копировать шаблон"}
+              </button>
+            ) : null}
+          </div>
+          </div>
+        ) : null}
+
+        {/*  Список отрезков: у каждого своё время, своё описание модели,
+             свой промпт в выбранном режиме и своя кнопка копирования. */}
+        {segments.length ? (
+          <div className="animate-rise mt-3 space-y-2.5">
+            <p className="hud-label">Отрезки · {segments.length}</p>
+            {segments.map((отрезок) => (
+              <div key={отрезок.index} className="rounded-lg border border-line-soft bg-void/50 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-display text-[12.5px] font-bold uppercase tracking-[0.07em] text-chalk">
+                    Отрезок {отрезок.index + 1}
+                    <span className="ml-2 font-mono text-[11px] font-normal tracking-normal text-ice">
+                      {отрезок.label}
+                    </span>
+                  </p>
+                  <button
+                    type="button"
+                    className="btn px-2.5 py-1 text-[11.5px]"
+                    title={`Скопировать промпт отрезка ${отрезок.index + 1} на ${lang === "ru" ? "русском" : "английском"}`}
+                    onClick={() => copy(отрезок.prompt[lang], `отрезок-${отрезок.index}`)}
+                  >
+                    {copied === `отрезок-${отрезок.index}` ? "Скопировано" : "Копировать"}
+                  </button>
+                </div>
+                <p className="mt-1.5 text-[12.5px] leading-relaxed text-chalk/90">{отрезок.answer[lang]}</p>
+                <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-md border border-line-soft bg-void/70 p-2.5 font-mono text-[11.5px] leading-relaxed text-muted">
+                  {отрезок.prompt[lang]}
+                </pre>
+              </div>
+            ))}
           </div>
         ) : null}
 
@@ -497,40 +642,6 @@ export function PromptPanel({
                 </button>
               </div>
             ) : null}
-            <div>
-              <p className="hud-label mb-1.5">Чем заполнить промпт</p>
-              <div className="flex flex-wrap gap-1.5">
-                {APPLY_MODES.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    title={m.hint}
-                    onClick={() => onApplyEnrich(m.id)}
-                    className={`rounded-lg border px-3 py-2 font-display text-[12px] font-semibold transition ${
-                      m.id === applyMode
-                        ? "border-ember/60 bg-ember/14 text-ember"
-                        : "border-line bg-void/50 text-muted hover:border-edge hover:text-chalk"
-                    }`}
-                  >
-                    {m.id === applyMode ? <IconCheck width={13} height={13} className="mr-1 inline" /> : null}
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-              <p className="mt-1.5 text-[11.5px] leading-snug text-dim">
-                Флаги --ar и --duration добавляются в любом режиме. Выбранный режим запомнится.
-              </p>
-              {applyMode === "template" ? (
-                <button
-                  type="button"
-                  className="btn mt-2 px-3 py-1.5 text-[12px]"
-                  title="Скопировать английскую версию шаблона со слотами"
-                  onClick={() => copy(draftEn, "шаблон")}
-                >
-                  {copied === "шаблон" ? "Скопировано" : "Копировать шаблон"}
-                </button>
-              ) : null}
-            </div>
 
             <div className="flex flex-wrap gap-2">
               {/*  Копируем не голый ответ модели, а английскую версию того, что
