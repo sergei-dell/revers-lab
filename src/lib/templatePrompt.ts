@@ -35,6 +35,8 @@ export type TemplateSource = {
   meta: VideoMeta | null;
   /** «--ar 16:9 --duration 10» из промпта измерений */
   flags: string;
+  /** выбранный стилевой пресет: строка Style в блоке GLOBAL */
+  style: { ru: string; en: string };
 };
 
 /*  Границы слова в JavaScript знают только латиницу: «\bженщина» не
@@ -234,18 +236,33 @@ export function buildTemplatePrompt(source: TemplateSource): { ru: string; en: s
     }
 
     // ── GLOBAL ───────────────────────────────────────────────────────
+    // По строке на параметр: сплошную строку через точку с запятой
+    // генератор разбирает хуже, да и глазом её не прочесть.
     const камера = a ? (CAMERA_LABELS[a.camera] ?? { ru: "камера не определена", en: "camera undetermined" }) : null;
     const палитра = (a?.palette ?? []).slice(0, 5).map((p) => p.hex).join(", ");
-    const global = [ответ.camera, ответ.light, ответ.color, ответ.texture]
-      .map((s) => s.trim())
-      .filter(Boolean);
-    if (камера) global.push(lang === "ru" ? `движение камеры: ${камера.ru}` : `camera move: ${камера.en}`);
-    if (палитра) global.push(lang === "ru" ? `палитра: ${палитра}` : `palette: ${палитра}`);
+    const стиль = (lang === "ru" ? source.style.ru : source.style.en).trim();
+    const движение = камера ? (lang === "ru" ? камера.ru : камера.en) : "";
+    const строкаКамеры = [ответ.camera.trim(), движение].filter(Boolean).join(", ");
+    const строкаЦвета = [ответ.color.trim(), палитра].filter(Boolean).join(", ");
+    const global = [
+      стиль ? `Style: ${стиль}` : "",
+      строкаКамеры ? `Camera: ${строкаКамеры}` : "",
+      ответ.light.trim() ? `Light: ${ответ.light.trim()}` : "",
+      строкаЦвета ? `Colour: ${строкаЦвета}` : "",
+      ответ.texture.trim() ? `Texture: ${ответ.texture.trim()}` : "",
+    ].filter(Boolean);
 
-    const запреты = ["no text", "no letters", "no logos", "no watermarks"];
-    for (const кусок of ответ.negative.split(/[,;]/)) {
-      const чистый = кусок.trim().toLowerCase();
-      if (чистый && !запреты.includes(чистый) && запреты.length < 10) запреты.push(чистый);
+    /*  ЗАПРЕТЫ ЦЕЛИКОМ. Раньше список обрезался десятью позициями, и
+        половина негатива от модели пропадала. Берём всё, что она вернула,
+        плюс наши постоянные запреты, без повторов.                   */
+    const запреты: string[] = [];
+    const видели = new Set<string>();
+    for (const кусок of ["no text, no letters, no logos, no watermarks", ответ.negative].join(", ").split(/[,;\n]/)) {
+      const чистый = кусок.trim().replace(/\s+/g, " ");
+      const ключ = чистый.toLowerCase();
+      if (!чистый || видели.has(ключ)) continue;
+      видели.add(ключ);
+      запреты.push(чистый);
     }
 
     // ── TIMELINE ─────────────────────────────────────────────────────
@@ -281,7 +298,8 @@ export function buildTemplatePrompt(source: TemplateSource): { ru: string; en: s
       "",
       `CORE SCENE: ${ядро || основа}`,
       "",
-      `GLOBAL: ${global.join("; ")}`,
+      "GLOBAL:",
+      global.join("\n"),
       `Exclusions: ${запреты.join(", ")}`,
       "",
       "TIMELINE:",

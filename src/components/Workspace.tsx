@@ -34,7 +34,7 @@ import {
   slugify,
   uid,
 } from "@/lib/format";
-import { buildPrompt, measurementLines, metricReadouts, type StylePreset } from "@/lib/prompt";
+import { buildPrompt, measurementLines, metricReadouts, STYLE_PRESETS, type StylePreset } from "@/lib/prompt";
 import {
   DEFAULT_ENRICH_FRAMES,
   ENRICH_FRAME_OPTIONS,
@@ -821,6 +821,7 @@ export function Workspace() {
                 analysis,
                 meta,
                 flags: (bundle.ru.match(/--ar \S+ --duration \d+/) ?? [])[0] ?? "",
+                style: STYLE_PRESETS.find((p) => p.id === preset) ?? { ru: "", en: "" },
               })
             : null;
         const build = (local: string, ai: string, measures: string, шаблон: string) => {
@@ -883,7 +884,7 @@ export function Workspace() {
         pushToast("error", "Режим не сработал", текст);
       }
     },
-    [analysis, bundle, draftEn, draftRu, enrichResult, lang, meta, pushToast],
+    [analysis, bundle, draftEn, draftRu, enrichResult, lang, meta, preset, pushToast],
   );
 
   const save = useCallback(async () => {
