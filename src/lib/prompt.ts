@@ -186,6 +186,13 @@ function subjectPhrase(tags: string) {
   return { ru: list.join(", "), en: list.join(", ") };
 }
 
+/*  Число, на которое можно положиться: разбор мог прийти из старой записи
+    истории, и одно неожиданное значение роняло целое нажатие.        */
+const число = (v: unknown, запас = 0) => (typeof v === "number" && Number.isFinite(v) ? v : запас);
+const доля = (v: unknown) => (число(v) * 100).toFixed(1);
+const подписьКамеры = (камера: Analysis["camera"]) =>
+  CAMERA_LABELS[камера] ?? { ru: "камера не определена", en: "camera undetermined" };
+
 export function durationFlag(durationSec: number, preset: StylePreset): number {
   const seconds = Math.round(durationSec || 5);
   if (preset === "seedance") return Math.max(3, Math.min(12, seconds));
@@ -196,33 +203,38 @@ export function durationFlag(durationSec: number, preset: StylePreset): number {
     не измерит — точные коды палитры, разобранное движение камеры,
     число планов и зерно.                                            */
 export function measurementLines(a: Analysis, meta: VideoMeta): { ru: string; en: string } {
-  const palette = a.palette.slice(0, 7);
-  const paletteRu = palette.map((p) => `${p.nameRu} ${p.hex}`).join(", ") || "нейтральная";
-  const paletteEn = palette.map((p) => `${p.name} ${p.hex}`).join(", ") || "neutral";
-  const camera = CAMERA_LABELS[a.camera];
-  const confidence = Math.round(a.cameraConfidence * 100);
+  /*  Ни одно поле здесь не обязано быть на месте: разбор мог прийти из
+      старой записи истории или из чужой версии. Раньше одно неожиданное
+      значение роняло сборку, а вместе с ней — всё нажатие целиком, и ни
+      один из трёх режимов не срабатывал.                              */
+  const palette = Array.isArray(a.palette) ? a.palette.slice(0, 7) : [];
+  const paletteRu = palette.map((p) => `${p.nameRu ?? p.name ?? "цвет"} ${p.hex}`).join(", ") || "нейтральная";
+  const paletteEn = palette.map((p) => `${p.name ?? p.nameRu ?? "color"} ${p.hex}`).join(", ") || "neutral";
+  const camera = подписьКамеры(a.camera);
+  const confidence = Math.round(число(a.cameraConfidence) * 100);
+  const scenes = Array.isArray(a.scenes) ? a.scenes : [];
   const cuts =
-    a.scenes.length > 1
-      ? { ru: `${a.scenes.length} плана, жёсткие склейки`, en: `${a.scenes.length} shots, hard cuts` }
+    scenes.length > 1
+      ? { ru: `${scenes.length} плана, жёсткие склейки`, en: `${scenes.length} shots, hard cuts` }
       : { ru: "один непрерывный дубль", en: "one continuous take" };
-  const grainRu = a.grain > 0.035 ? `плёночное зерно ${(a.grain * 100).toFixed(1)}%` : `чистая цифра, зерно ${(a.grain * 100).toFixed(1)}%`;
-  const grainEn = a.grain > 0.035 ? `film grain ${(a.grain * 100).toFixed(1)}%` : `clean digital, grain ${(a.grain * 100).toFixed(1)}%`;
-  const motionRu = `движение ${(a.motionMean * 100).toFixed(1)}%, дрожание ${(a.motionShake * 100).toFixed(1)}%`;
-  const motionEn = `motion ${(a.motionMean * 100).toFixed(1)}%, shake ${(a.motionShake * 100).toFixed(1)}%`;
+  const grainRu = число(a.grain) > 0.035 ? `плёночное зерно ${доля(a.grain)}%` : `чистая цифра, зерно ${доля(a.grain)}%`;
+  const grainEn = число(a.grain) > 0.035 ? `film grain ${доля(a.grain)}%` : `clean digital, grain ${доля(a.grain)}%`;
+  const motionRu = `движение ${доля(a.motionMean)}%, дрожание ${доля(a.motionShake)}%`;
+  const motionEn = `motion ${доля(a.motionMean)}%, shake ${доля(a.motionShake)}%`;
   return {
     ru: [
       `Палитра: ${paletteRu}.`,
       `Камера: ${camera.ru} (${confidence}% уверенности), ${motionRu}.`,
       `Монтаж: ${cuts.ru}.`,
-      `Фактура: ${grainRu}, детализация ${(a.edges * 100).toFixed(1)}%.`,
-      `Съёмка: ${meta.width}×${meta.height} (${meta.aspect}), ${meta.durationSec.toFixed(1)} с, ${meta.fps} к/с.`,
+      `Фактура: ${grainRu}, детализация ${доля(a.edges)}%.`,
+      `Съёмка: ${meta.width}×${meta.height} (${meta.aspect}), ${число(meta.durationSec).toFixed(1)} с, ${meta.fps} к/с.`,
     ].join("\n"),
     en: [
       `Palette: ${paletteEn}.`,
       `Camera: ${camera.en} (${confidence}% confidence), ${motionEn}.`,
       `Editing: ${cuts.en}.`,
-      `Texture: ${grainEn}, detail ${(a.edges * 100).toFixed(1)}%.`,
-      `Source: ${meta.width}x${meta.height} (${meta.aspect}), ${meta.durationSec.toFixed(1)}s, ${meta.fps} fps.`,
+      `Texture: ${grainEn}, detail ${доля(a.edges)}%.`,
+      `Source: ${meta.width}x${meta.height} (${meta.aspect}), ${число(meta.durationSec).toFixed(1)}s, ${meta.fps} fps.`,
     ].join("\n"),
   };
 }
@@ -260,8 +272,8 @@ export function buildPrompt(input: {
   const flags = `${ar} --duration ${durationFlag(meta.durationSec, style.id)}`;
 
   const tech = {
-    ru: `${meta.width}×${meta.height} (${meta.aspect}), ${meta.durationSec.toFixed(1)} с, ${meta.fps} к/с`,
-    en: `${meta.width}x${meta.height} (${meta.aspect}), ${meta.durationSec.toFixed(1)}s, ${meta.fps} fps`,
+    ru: `${meta.width}×${meta.height} (${meta.aspect}), ${число(meta.durationSec).toFixed(1)} с, ${meta.fps} к/с`,
+    en: `${meta.width}x${meta.height} (${meta.aspect}), ${число(meta.durationSec).toFixed(1)}s, ${meta.fps} fps`,
   };
 
   const ruParts = [
@@ -287,10 +299,10 @@ export function buildPrompt(input: {
 
   const tagSet = uniqueTags([
     style.id !== "none" ? style.label.toLowerCase() : "",
-    CAMERA_LABELS[a.camera].en,
+    подписьКамеры(a.camera).en,
     a.exposure === "low-key" ? "low-key" : a.exposure === "high-key" ? "high-key" : "mid-tone",
     a.saturation < 0.2 ? "desaturated" : a.saturation > 0.55 ? "vivid color" : "natural color",
-    a.grain > 0.035 ? "film grain" : "clean",
+    число(a.grain) > 0.035 ? "film grain" : "clean",
     a.edges > 0.16 ? "highly detailed" : "soft focus",
     a.motionMean > 0.08 ? "dynamic motion" : "slow motion",
     a.warmth > 0.08 ? "warm tone" : a.warmth < -0.06 ? "cool tone" : "neutral tone",
@@ -299,7 +311,7 @@ export function buildPrompt(input: {
   ]);
   const cleanTags = tagSet.filter((t) => t.length > 1);
 
-  const headline = `${subject.ru.split(",")[0].slice(0, 46) || "Без названия"} · ${CAMERA_LABELS[a.camera].ru}`;
+  const headline = `${subject.ru.split(",")[0].slice(0, 46) || "Без названия"} · ${подписьКамеры(a.camera).ru}`;
 
   const structured: Record<string, unknown> = {
     subject: subject.ru === subject.en ? subject.en : { ru: subject.ru, en: subject.en },
@@ -327,8 +339,8 @@ export function buildPrompt(input: {
     },
     camera: {
       move: a.camera,
-      description_en: CAMERA_LABELS[a.camera].en,
-      description_ru: CAMERA_LABELS[a.camera].ru,
+      description_en: подписьКамеры(a.camera).en,
+      description_ru: подписьКамеры(a.camera).ru,
       confidence: Number(a.cameraConfidence.toFixed(2)),
       translation_px: a.cameraVector,
       motion_mean: Number(a.motionMean.toFixed(4)),

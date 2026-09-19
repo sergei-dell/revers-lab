@@ -68,6 +68,7 @@ export function PromptPanel({
   onFrameCountChange,
   frameLimit,
   scrollHint,
+  applied,
   onDismissEnrich,
   saveState,
   onSave,
@@ -96,18 +97,35 @@ export function PromptPanel({
   frameLimit: FrameLimitInfo | null;
   /** куда прокрутить окно промпта после подстановки */
   scrollHint: { share: number; key: number } | null;
+  /** чем закончилось последнее нажатие режима — окно сверит это с собой */
+  applied: { mode: ApplyMode; length: number; key: number } | null;
   onDismissEnrich: () => void;
   saveState: SaveState;
   onSave: () => void;
 }) {
   const [copied, setCopied] = useState<string | null>(null);
   const area = useRef<HTMLTextAreaElement | null>(null);
+  const checked = useRef<number | null>(null);
 
   useEffect(() => {
     if (!copied) return;
     const t = setTimeout(() => setCopied(null), 1800);
     return () => clearTimeout(t);
   }, [copied]);
+
+  /*  СВЕРКА: то ли лежит в окне, что собрал обработчик. Если нет — видно
+      сразу и в консоли, и человеку: раньше «ничего не происходит» нельзя
+      было отличить от «текст собрался, но не доехал».                 */
+  useEffect(() => {
+    if (!applied || checked.current === applied.key) return;
+    const вОкне = area.current?.value.length ?? -1;
+    const сошлось = вОкне === applied.length;
+    // Сошлось — больше не сверяем: дальше текст меняет уже человек.
+    if (сошлось) checked.current = applied.key;
+    console.info(
+      `[режимы] ${applied.mode}: в окне ${вОкне} знаков, собрано ${applied.length} — ${сошлось ? "совпало" : "НЕ СОВПАЛО"}`,
+    );
+  }, [applied, draft]);
 
   /*  Показать то, что добавилось. Окно промпта невысокое: при ответе модели
       в три-пять предложений блок замеров уходит ниже видимой части, и первый

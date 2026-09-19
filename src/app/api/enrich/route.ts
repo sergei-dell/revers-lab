@@ -210,7 +210,19 @@ export async function POST(request: Request) {
       );
     }
     const modelMs = Date.now() - startedAt;
-    console.info(`[enrich] модель ${model}: кадров ${frames.length}, запрос ${requestKb} КБ, ответ за ${modelMs} мс`);
+    /*  Что именно вернула модель — по длинам и числу полей, без самого
+        текста: по этой строке видно, почему в окне промпта могло ничего
+        не поменяться (например, пустые prompt_ru и prompt_en).        */
+    console.info(
+      `[enrich] модель ${model}: кадров ${frames.length}, запрос ${requestKb} КБ, ответ за ${modelMs} мс; ` +
+        `promptRu ${parsed.ru.length} знаков, promptEn ${parsed.en.length}, тегов ${parsed.tags.length}, ` +
+        `тактов ${parsed.action.length}, замен ${parsed.replacements.length}, негатив ${parsed.negative.length}; ` +
+        `пустые поля: ${
+          (["subject", "environment", "camera", "light", "color", "texture", "sound"] as const)
+            .filter((поле) => !parsed[поле])
+            .join(", ") || "нет"
+        }`,
+    );
     return Response.json({ ...parsed, model, source: "pollinations", timing: { frames: frames.length, requestKb, modelMs } });
   } catch (error) {
     const aborted = error instanceof Error && error.name === "AbortError";

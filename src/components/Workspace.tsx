@@ -163,6 +163,9 @@ export function Workspace() {
   /*  Куда прокрутить окно промпта после подстановки: доля от начала текста
       и ключ, чтобы прокрутка срабатывала и на повторное нажатие.        */
   const [scrollHint, setScrollHint] = useState<{ share: number; key: number } | null>(null);
+  /*  Чем закончилось последнее нажатие режима: окно промпта сверит это с
+      тем, что реально лежит в поле, и скажет, если текст не доехал.   */
+  const [applied, setApplied] = useState<{ mode: ApplyMode; length: number; key: number } | null>(null);
   const [enrichError, setEnrichError] = useState<string | null>(null);
 
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -768,49 +771,91 @@ export function Workspace() {
       палитры, движение камеры, монтаж, зерно; «только замеры» — как было
       до нейросети. Флаги --ar и --duration стоят в промпте измерений и
       дописываются к ответу модели, если их там нет.                  */
+  /*  ТРИ РЕЖИМА ЗАПОЛНЕНИЯ. «Только модель» — описание сцены; «модель +
+      замеры» — описание плюс то, что модель по кадрам не измерит: коды
+      палитры, движение камеры, монтаж, зерно; «только замеры» — как было
+      до нейросети. Флаги --ar и --duration стоят в промпте измерений и
+      дописываются к ответу модели, если их там нет.
+
+      Каждое нажатие пишет в консоль браузера строку «[режимы] …»: что
+      нажали, что собралось и какой длины. Молча не сделать ничего этот
+      обработчик больше не может: раньше одна ошибка внутри — и ни одна
+      из трёх кнопок не отзывалась, а человек видел просто неподвижный
+      текст.                                                          */
   const applyEnrich = useCallback(
     (mode: ApplyMode) => {
-      if (!bundle) return;
-      if (mode !== "metrics" && !enrichResult) return;
-      applyModeStore.save(mode);
+      const было = (lang === "ru" ? draftRu : draftEn).length;
+      const скажем = (что: string, ещё?: Record<string, unknown>) =>
+        console.info(`[режимы] ${mode}: ${что}`, { былоЗнаков: было, ...(ещё ?? {}) });
+      try {
+        applyModeStore.save(mode);
+        if (!bundle) {
+          скажем("разбор ещё не готов — подставлять нечего");
+          pushToast("error", "Разбор ещё не готов", "Дождитесь конца анализа или откройте видео заново");
+          return;
+        }
+        if (mode !== "metrics" && !enrichResult) {
+          скажем("ответа модели нет");
+          pushToast("error", "Ответа модели нет", "Сначала нажмите «Описать кадры моделью»");
+          return;
+        }
 
-      const measured = analysis && meta ? measurementLines(analysis, meta) : null;
-      const build = (local: string, ai: string, measures: string) => {
-        if (mode === "metrics") return local;
-        const head = ai.trim();
-        if (!head) return local;
-        const body = mode === "both" && measures ? `${head}\n\n${MEASURED_HEAD}\n${measures}` : head;
-        return withFlags(body, local);
-      };
+        const measured = analysis && meta ? measurementLines(analysis, meta) : null;
+        const build = (local: string, ai: string, measures: string) => {
+          if (mode === "metrics") return local;
+          const head = ai.trim();
+          if (!head) return local;
+          const body = mode === "both" && measures ? `${head}\n\n${MEASURED_HEAD}\n${measures}` : head;
+          return withFlags(body, local);
+        };
 
-      const ru = build(bundle.ru, enrichResult?.ru ?? "", measured?.ru ?? "");
-      setDraftRu(ru);
-      setDraftEn(build(bundle.en, enrichResult?.en ?? "", measured?.en ?? ""));
-      setDirty(true);
-      setLang("ru");
-      setView("prompt");
-      /*  Ответ модели — это три-пять предложений, и блок замеров уходит вниз,
-          за край окна промпта: первый экран получался буква в букву как в
-          режиме «только модель», и казалось, что замеры не подставились.
-          Поэтому окно само прокручивается к началу блока.               */
-      const mark = ru.indexOf(MEASURED_HEAD);
-      setScrollHint(mark >= 0 && ru.length ? { share: mark / ru.length, key: Date.now() } : null);
-      if (mode === "both" && !measured) {
-        pushToast("error", "Замеры не готовы", "Подставлено только описание модели");
-      }
-      if (mode !== "metrics" && enrichResult?.tags.length) {
-        setTags((prev) => mergeTags(prev, enrichResult.tags));
-      }
-      if (mode === "metrics") {
-        pushToast("success", "Промпт собран из измерений");
-      } else if (mode === "both" && measured) {
-        const строк = measured.ru.split("\n").length;
-        pushToast("success", "Описание модели и замеры вместе", `Ниже описания добавлено строк замеров: ${строк}`);
-      } else if (mode === "model") {
-        pushToast("success", "Описание модели подставлено");
+        const ru = build(bundle.ru, enrichResult?.ru ?? "", measured?.ru ?? "");
+        const en = build(bundle.en, enrichResult?.en ?? "", measured?.en ?? "");
+        const прежний = lang === "ru" ? draftRu : draftEn;
+        const новый = lang === "ru" ? ru : en;
+
+        setDraftRu(ru);
+        setDraftEn(en);
+        setDirty(true);
+        setLang("ru");
+        setView("prompt");
+        /*  Ответ модели — три-пять предложений, и блок замеров уходит вниз,
+            за край окна промпта. Прокручиваем к нему.                   */
+        const mark = ru.indexOf(MEASURED_HEAD);
+        setScrollHint(mark >= 0 && ru.length ? { share: mark / ru.length, key: Date.now() } : null);
+        setApplied({ mode, length: новый.length, key: Date.now() });
+
+        скажем("собрано", {
+          сталоЗнаков: новый.length,
+          ответМоделиЗнаков: (enrichResult?.ru ?? "").length,
+          замеры: measured ? `${measured.ru.split("\n").length} строк` : "не собрались",
+          текстИзменился: новый !== прежний,
+        });
+
+        if (mode === "both" && !measured) {
+          pushToast("error", "Замеры не готовы", "Подставлено только описание модели");
+        } else if (новый === прежний) {
+          pushToast(
+            "info",
+            "Текст не изменился",
+            mode === "metrics"
+              ? "В окне уже стоял промпт из измерений"
+              : "Ответ модели совпал с тем, что было в окне",
+          );
+        } else if (mode === "metrics") {
+          pushToast("success", "Промпт собран из измерений");
+        } else if (mode === "both" && measured) {
+          pushToast("success", "Описание модели и замеры вместе", `Строк замеров: ${measured.ru.split("\n").length}`);
+        } else {
+          pushToast("success", "Описание модели подставлено");
+        }
+      } catch (error) {
+        const текст = error instanceof Error ? error.message : String(error);
+        console.error(`[режимы] ${mode}: НЕ СРАБОТАЛО —`, error);
+        pushToast("error", "Режим не сработал", текст);
       }
     },
-    [analysis, bundle, enrichResult, meta, pushToast],
+    [analysis, bundle, draftEn, draftRu, enrichResult, lang, meta, pushToast],
   );
 
   const save = useCallback(async () => {
@@ -923,6 +968,11 @@ export function Workspace() {
       aspect: aspectLabel(item.width, item.height),
     });
     setAnalysis(a);
+    /*  Ответ модели относился к прежнему ролику: с ним кнопки режимов
+        остаются на экране, но подставлять им уже нечего.             */
+    setEnrichState("idle");
+    setEnrichResult(null);
+    setEnrichError(null);
     setTags(item.subjectTags || "");
     setDraftRu(item.promptRu);
     setDraftEn(item.promptEn);
@@ -1209,6 +1259,7 @@ export function Workspace() {
                   onFrameCountChange={(n) => frameCountStore.save(n)}
                   frameLimit={frameLimitInfo}
                   scrollHint={scrollHint}
+                  applied={applied}
                   onDismissEnrich={() => {
                     setEnrichState("idle");
                     setEnrichResult(null);
