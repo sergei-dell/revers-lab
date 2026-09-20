@@ -99,6 +99,7 @@ export function PromptPanel({
   onEnrich,
   onApplyEnrich,
   applyMode,
+  hasAnswer,
   frameCount,
   onFrameCountChange,
   frameLimit,
@@ -135,6 +136,8 @@ export function PromptPanel({
   onEnrich: () => void;
   onApplyEnrich: (mode: ApplyMode) => void;
   applyMode: ApplyMode;
+  /** есть ли ответ модели: без него доступны одни замеры */
+  hasAnswer: boolean;
   frameCount: EnrichFrameCount;
   onFrameCountChange: (count: EnrichFrameCount) => void;
   frameLimit: FrameLimitInfo | null;
@@ -504,32 +507,42 @@ export function PromptPanel({
           </div>
         ) : null}
 
-        {/*  Выбор режима нужен и при разборе по отрезкам: он задаёт,
-             каким будет промпт каждого отрезка.                      */}
-        {enrichState === "done" && (enrichResult || segments.length) ? (
-          <div className="mt-3">
+        {/*  Выбор режима виден всегда: пока модель не ответила, горят одни
+             замеры, а остальные три кнопки недоступны — подставлять им
+             нечего, и подсветка не должна обещать лишнего.            */}
+        <div className="mt-3">
           <div>
             <p className="hud-label mb-1.5">Чем заполнить промпт</p>
             <div className="flex flex-wrap gap-1.5">
-              {APPLY_MODES.map((m) => (
+              {APPLY_MODES.map((m) => {
+                const недоступен = m.id !== "metrics" && !hasAnswer;
+                return (
                 <button
                   key={m.id}
                   type="button"
-                  title={m.hint}
+                  disabled={недоступен}
+                  title={недоступен ? "Сначала нажмите «Описать кадры моделью»" : m.hint}
                   onClick={() => onApplyEnrich(m.id)}
                   className={`rounded-lg border px-3 py-2 font-display text-[12px] font-semibold transition ${
                     m.id === applyMode
                       ? "border-ember/60 bg-ember/14 text-ember"
-                      : "border-line bg-void/50 text-muted hover:border-edge hover:text-chalk"
+                      : недоступен
+                        ? "cursor-not-allowed border-line bg-void/40 text-dim opacity-55"
+                        : "border-line bg-void/50 text-muted hover:border-edge hover:text-chalk"
                   }`}
                 >
                   {m.id === applyMode ? <IconCheck width={13} height={13} className="mr-1 inline" /> : null}
                   {m.label}
                 </button>
-              ))}
+                );
+              })}
             </div>
             <p className="mt-1.5 text-[11.5px] leading-snug text-dim">
-              Флаги --ar и --duration добавляются в любом режиме. Выбранный режим запомнится.
+              {!hasAnswer
+                ? "Пока модель не описала кадры, доступны только замеры. Окно промпта и кнопки копирования всегда показывают подсвеченный режим."
+                : segments.length && !enrichResult
+                  ? "Ролик разобран по отрезкам: режим собирает промпт каждого отрезка в списке ниже. В окне выше — общий промпт по замерам на весь ролик."
+                  : "Флаги --ar и --duration добавляются в любом режиме. Выбранный режим запомнится."}
             </p>
             {applyMode === "template" ? (
               <button
@@ -542,8 +555,7 @@ export function PromptPanel({
               </button>
             ) : null}
           </div>
-          </div>
-        ) : null}
+        </div>
 
         {/*  Список отрезков: у каждого своё время, своё описание модели,
              свой промпт в выбранном режиме и своя кнопка копирования. */}

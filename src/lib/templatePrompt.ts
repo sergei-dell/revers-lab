@@ -1,4 +1,5 @@
 import { CAMERA_LABELS } from "@/lib/video/analyze";
+import { ЗАПРЕТЫ_НАДПИСЕЙ, строкиБезНадписей } from "@/lib/lettering";
 import type { Analysis, VideoMeta } from "@/lib/types";
 
 // ШАБЛОН СО СЛОТАМИ — четвёртый режим промпта.
@@ -333,13 +334,22 @@ export function buildTemplatePrompt(source: TemplateSource): { ru: string; en: s
     const запреты: string[] = [];
     const видели = new Set<string>();
     const негатив = общий ? общий.negative : ответ.negative;
-    for (const кусок of ["no text, no letters, no logos, no watermarks", негатив].join(", ").split(/[,;\n]/)) {
+    for (const кусок of [
+      "no text, no letters, no logos, no watermarks",
+      // Слова про надписи на предметах держим здесь постоянно.
+      ЗАПРЕТЫ_НАДПИСЕЙ.join(", "),
+      негатив,
+    ]
+      .join(", ")
+      .split(/[,;\n]/)) {
       const чистый = кусок.trim().replace(/\s+/g, " ");
       const ключ = чистый.toLowerCase();
       if (!чистый || видели.has(ключ)) continue;
       видели.add(ключ);
       запреты.push(чистый);
     }
+
+    const обереги = строкиБезНадписей(ответ);
 
     // ── TIMELINE ─────────────────────────────────────────────────────
     const отрезок = source.range;
@@ -389,6 +399,9 @@ export function buildTemplatePrompt(source: TemplateSource): { ru: string; en: s
       references.length ? references.join("\n") : lang === "ru" ? "слоты не нужны: в кадре нечего заменять" : "no reference slots needed",
       "",
       `CORE SCENE: ${ядро || основа}`,
+      /*  Предметы, на которых генератор норовит написать текст, идут
+          отдельными строками сразу под сценой.                      */
+      обереги.join("\n"),
       "",
       "GLOBAL:",
       global.join("\n"),

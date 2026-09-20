@@ -52,6 +52,7 @@ import {
 import { readHistory, writeHistory } from "@/lib/localHistory";
 import { createChoiceStore, useChoice } from "@/lib/prefs";
 import { segmentLabel, splitIntoSegments, type Segment } from "@/lib/segments";
+import { строкиБезНадписей } from "@/lib/lettering";
 import { buildTemplatePrompt, splitTemplate, слотыРолика } from "@/lib/templatePrompt";
 import { STATIC_BUILD } from "@/lib/staticMode";
 import { analysisFromRow, toStoredMetrics } from "@/lib/store";
@@ -122,6 +123,10 @@ function собратьТекст(
   const { local, answer, analysis, meta, style, flags, shared, range } = части;
   // Промпт измерений тоже проходит через флаги: у отрезка своя длительность.
   if (!answer) return local;
+  /*  ЗАЩИТА ОТ БУКВ. Модель увидела упаковку, банку, вывеску, экран или
+      одежду с принтом — генератору отдельной строкой запрещаем писать на
+      них что бы то ни было. В шаблоне эти строки ставит сам шаблон.  */
+  const обереги = mode === "template" ? [] : строкиБезНадписей(answer);
   const measured = analysis && meta ? measurementLines(analysis, meta) : null;
   const template =
     mode === "template"
@@ -143,7 +148,17 @@ function собратьТекст(
     const есть = /--ar \S+ --duration \d+/;
     return есть.test(текст) ? текст.replace(есть, flags) : `${текст.trimEnd()}\n\n${flags}`;
   };
-  return { ru: сФлагами(собрать("ru")), en: сФлагами(собрать("en")) };
+  /*  Обереги встают перед флагами: флаги должны остаться последней
+      строкой промпта.                                               */
+  const сОберегами = (текст: string) => {
+    if (!обереги.length) return текст;
+    const флаг = /--ar \S+ --duration \d+/;
+    const блок = обереги.join("\n");
+    const место = текст.search(флаг);
+    if (место < 0) return `${текст.trimEnd()}\n\n${блок}`;
+    return `${текст.slice(0, место).trimEnd()}\n\n${блок}\n\n${текст.slice(место).trim()}`;
+  };
+  return { ru: сОберегами(сФлагами(собрать("ru"))), en: сОберегами(сФлагами(собрать("en"))) };
 }
 
 // Заголовок блока замеров: по нему же окно промпта находит, куда прокрутить.
@@ -224,9 +239,11 @@ export function Workspace() {
   const [view, setView] = useState<"prompt" | "json" | "negative">("prompt");
   const [preset, setPreset] = useState<StylePreset>("cinema");
   const [tags, setTags] = useState("");
-  const [draftRu, setDraftRu] = useState("");
-  const [draftEn, setDraftEn] = useState("");
-  const [dirty, setDirty] = useState(false);
+  /*  Текст окна промпта собирается сам по подсвеченному режиму. Здесь
+      лежит ТОЛЬКО правка руками: пока её нет, в окне ровно то, что горит
+      кнопкой и что уйдёт в буфер. Раньше текст был отдельным состоянием
+      и отставал от подсветки.                                         */
+  const [ручнаяПравка, setРучнаяПравка] = useState<{ ru: string; en: string } | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [savedId, setSavedId] = useState<string | null>(null);
 
@@ -235,7 +252,7 @@ export function Workspace() {
   /*  Последний выбор «чем заполнить промпт» живёт в памяти браузера. На
       сервере памяти нет — там режим по умолчанию, и разметка при первом
       показе совпадает; браузер сразу подставляет запомненный.         */
-  const applyMode = useChoice(applyModeStore);
+  const выбранныйРежим = useChoice(applyModeStore);
   const frameCount = useChoice(frameCountStore);
   const [frameLimitInfo, setFrameLimitInfo] = useState<FrameLimitInfo | null>(null);
   /*  Куда прокрутить окно промпта после подстановки: доля от начала текста
@@ -274,6 +291,11 @@ export function Workspace() {
 
 
   const busy = phase === "decoding" || phase === "probing" || phase === "analyzing";
+  /*  Ответ модели есть — доступны все четыре режима и горит тот, что
+      человек выбирал в прошлый раз. Ответа нет — остаются одни замеры:
+      подставлять больше нечего, и подсветка не должна врать.          */
+  const ответЕсть = Boolean(enrichResult) || segments.length > 0;
+  const applyMode: ApplyMode = ответЕсть ? выбранныйРежим : "metrics";
 
   const pushToast = useCallback((tone: Toast["tone"], title: string, detail?: string) => {
     const id = uid("t");
@@ -292,17 +314,39 @@ export function Workspace() {
     return buildPrompt({ analysis, meta, tags, preset });
   }, [analysis, meta, tags, preset]);
 
-  useEffect(() => {
-    if (!bundle || dirty) return;
-    setDraftRu(bundle.ru);
-    setDraftEn(bundle.en);
-  }, [bundle, dirty]);
+  /*  Стиль и флаги ролика — их просят сразу несколько сборок. */
+  const стильРолика = useMemo(
+    () => STYLE_PRESETS.find((p) => p.id === preset) ?? { ru: "", en: "" },
+    [preset],
+  );
+  const флагиРолика = useMemo(
+    () => (bundle ? ((bundle.ru.match(/--ar \S+ --duration \d+/) ?? [])[0] ?? "") : ""),
+    [bundle],
+  );
 
+  /*  ОКНО ПРОМПТА ИДЁТ ЗА ПОДСВЕЧЕННОЙ КНОПКОЙ САМО. Новый разбор, новый
+      ответ модели, другой стиль — текст пересобирается без нажатия, и
+      подсветка, окно и буфер обмена всегда показывают одно и то же.  */
+  const собранное = useMemo(() => {
+    if (!bundle) return null;
+    return собратьТекст(applyMode, {
+      local: { ru: bundle.ru, en: bundle.en },
+      answer: enrichResult,
+      analysis,
+      meta,
+      style: стильРолика,
+      flags: флагиРолика,
+    });
+  }, [analysis, applyMode, bundle, enrichResult, meta, стильРолика, флагиРолика]);
+
+  const draftRu = ручнаяПравка?.ru ?? собранное?.ru ?? "";
+  const draftEn = ручнаяПравка?.en ?? собранное?.en ?? "";
   const draft = lang === "ru" ? draftRu : draftEn;
   const setDraft = (value: string) => {
-    setDirty(true);
-    if (lang === "ru") setDraftRu(value);
-    else setDraftEn(value);
+    setРучнаяПравка({
+      ru: lang === "ru" ? value : draftRu,
+      en: lang === "en" ? value : draftEn,
+    });
   };
 
   // ---------------- history ----------------
@@ -410,13 +454,11 @@ export function Workspace() {
         aspect: "16:9",
       });
       setPhase("decoding");
-      setDirty(false);
       /*  Новый ролик — новый разбор с чистого листа. Теги, черновики и ответ
           модели прежнего видео здесь жили дальше и копились: в разбор спальни
           попадали «noir, rainy night» из прошлого ролика.              */
       setTags("");
-      setDraftRu("");
-      setDraftEn("");
+      setРучнаяПравка(null);
       setSaveState("idle");
       setSavedId(null);
       setEnrichState("idle");
@@ -906,21 +948,46 @@ export function Workspace() {
   /*  ВСЕ ОТРЕЗКИ ОДНИМ ТЕКСТОМ: сквозные блоки идут сверху один раз,
       дальше отрезки по порядку со своим временем. В шаблоне блоки видны
       по заголовкам, в остальных режимах текст отрезка идёт целиком.   */
+  /*  Промпты отрезков тоже пересобираются под подсвеченный режим сами:
+      переключил кнопку — и кнопки копирования у отрезков сразу отдают
+      текст того же режима, без повторного разбора.                   */
+  const отрезки = useMemo(() => {
+    if (!segments.length || !bundle) return segments;
+    const общее = сквозное(segments.map((о) => о.answer));
+    return segments.map((о) => {
+      const длина = Math.max(1, Math.round(о.end - о.start));
+      return {
+        ...о,
+        prompt: собратьТекст(applyMode, {
+          local: { ru: bundle.ru, en: bundle.en },
+          answer: о.answer,
+          analysis,
+          meta: meta ? { ...meta, durationSec: о.end - о.start } : meta,
+          style: стильРолика,
+          // Длительность в флагах — своя у каждого отрезка, не всего ролика.
+          flags: флагиРолика.replace(/--duration \d+/, `--duration ${длина}`),
+          shared: общее,
+          range: { start: о.start, end: о.end },
+        }),
+      };
+    });
+  }, [analysis, applyMode, bundle, meta, segments, стильРолика, флагиРолика]);
+
   const склеенныеОтрезки = useMemo(() => {
-    if (!segments.length) return { ru: "", en: "" };
+    if (!отрезки.length) return { ru: "", en: "" };
     const склеить = (язык: "ru" | "en") => {
       if (applyMode === "template") {
-        const общее = splitTemplate(segments[0].prompt[язык]).shared;
-        const куски = segments.map((о) => {
+        const общее = splitTemplate(отрезки[0].prompt[язык]).shared;
+        const куски = отрезки.map((о) => {
           const своё = splitTemplate(о.prompt[язык]).perSegment;
           return `Отрезок ${о.index + 1} · ${о.label}\n${своё}`;
         });
         return [общее, ...куски].join("\n\n");
       }
-      return segments.map((о) => `Отрезок ${о.index + 1} · ${о.label}\n${о.prompt[язык]}`).join("\n\n");
+      return отрезки.map((о) => `Отрезок ${о.index + 1} · ${о.label}\n${о.prompt[язык]}`).join("\n\n");
     };
     return { ru: склеить("ru"), en: склеить("en") };
-  }, [applyMode, segments]);
+  }, [applyMode, отрезки]);
 
   const enrich = useCallback(async () => {
     if (!analysis || !bundle) return;
@@ -1017,29 +1084,27 @@ export function Workspace() {
     tags,
   ]);
 
-  /*  ТРИ РЕЖИМА ЗАПОЛНЕНИЯ. «Только модель» — описание сцены; «модель +
+  /*  ЧЕТЫРЕ РЕЖИМА ЗАПОЛНЕНИЯ. «Только модель» — описание сцены; «модель +
       замеры» — описание плюс то, что модель по кадрам не измерит: коды
       палитры, движение камеры, монтаж, зерно; «только замеры» — как было
-      до нейросети. Флаги --ar и --duration стоят в промпте измерений и
-      дописываются к ответу модели, если их там нет.                  */
-  /*  ТРИ РЕЖИМА ЗАПОЛНЕНИЯ. «Только модель» — описание сцены; «модель +
-      замеры» — описание плюс то, что модель по кадрам не измерит: коды
-      палитры, движение камеры, монтаж, зерно; «только замеры» — как было
-      до нейросети. Флаги --ar и --duration стоят в промпте измерений и
-      дописываются к ответу модели, если их там нет.
+      до нейросети; «шаблон со слотами» — разбор по блокам. Флаги --ar и
+      --duration дописываются во всех режимах.
+
+      Нажатие только ЗАПОМИНАЕТ режим и снимает ручную правку. Сам текст
+      — и в окне, и у каждого отрезка — собирается по подсвеченной кнопке
+      выше по файлу, поэтому подсветка, окно и буфер обмена разойтись не
+      могут: раньше кнопка «Модель + замеры» горела, а копировались одни
+      замеры.
 
       Каждое нажатие пишет в консоль браузера строку «[режимы] …»: что
       нажали, что собралось и какой длины. Молча не сделать ничего этот
-      обработчик больше не может: раньше одна ошибка внутри — и ни одна
-      из трёх кнопок не отзывалась, а человек видел просто неподвижный
-      текст.                                                          */
+      обработчик не может.                                            */
   const applyEnrich = useCallback(
     (mode: ApplyMode) => {
       const было = (lang === "ru" ? draftRu : draftEn).length;
       const скажем = (что: string, ещё?: Record<string, unknown>) =>
         console.info(`[режимы] ${mode}: ${что}`, { былоЗнаков: было, ...(ещё ?? {}) });
       try {
-        applyModeStore.save(mode);
         if (!bundle) {
           скажем("разбор ещё не готов — подставлять нечего");
           pushToast("error", "Разбор ещё не готов", "Дождитесь конца анализа или откройте видео заново");
@@ -1051,83 +1116,42 @@ export function Workspace() {
           return;
         }
 
-        // Разобрано по отрезкам — режим меняет промпт каждого отрезка.
-        if (segments.length) {
-          const стиль = STYLE_PRESETS.find((p) => p.id === preset) ?? { ru: "", en: "" };
-          const флаги = (bundle.ru.match(/--ar \S+ --duration \d+/) ?? [])[0] ?? "";
-          const общее = сквозное(segments.map((о) => о.answer));
-          setSegments((прежние) =>
-            прежние.map((отрезок) => {
-              // Длительность в флагах — своя у каждого отрезка, не всего ролика.
-              const длина = Math.max(1, Math.round(отрезок.end - отрезок.start));
-              return {
-                ...отрезок,
-                prompt: собратьТекст(mode, {
-                  local: { ru: bundle.ru, en: bundle.en },
-                  answer: отрезок.answer,
-                  analysis,
-                  meta: meta ? { ...meta, durationSec: отрезок.end - отрезок.start } : meta,
-                  style: стиль,
-                  flags: флаги.replace(/--duration \d+/, `--duration ${длина}`),
-                  shared: общее,
-                  range: { start: отрезок.start, end: отрезок.end },
-                }),
-              };
-            }),
-          );
-          скажем("пересобраны промпты отрезков", { отрезков: segments.length });
-          pushToast("success", "Промпты отрезков пересобраны", `Отрезков: ${segments.length}`);
-          if (!enrichResult) return;
-        }
-
-        const measured = analysis && meta ? measurementLines(analysis, meta) : null;
-        /*  ШАБЛОН СО СЛОТАМИ собирается отдельным сборщиком: у него своя
-            структура, а не промпт одной простынёй.                     */
-        const template =
-          mode === "template" && enrichResult
-            ? buildTemplatePrompt({
-                answer: enrichResult,
-                analysis,
-                meta,
-                flags: (bundle.ru.match(/--ar \S+ --duration \d+/) ?? [])[0] ?? "",
-                style: STYLE_PRESETS.find((p) => p.id === preset) ?? { ru: "", en: "" },
-              })
-            : null;
-        const build = (local: string, ai: string, measures: string, шаблон: string) => {
-          if (mode === "template") return шаблон || local;
-          if (mode === "metrics") return local;
-          const head = ai.trim();
-          if (!head) return local;
-          const body = mode === "both" && measures ? `${head}\n\n${MEASURED_HEAD}\n${measures}` : head;
-          return withFlags(body, local);
-        };
-
-        const ru = build(bundle.ru, enrichResult?.ru ?? "", measured?.ru ?? "", template?.ru ?? "");
-        const en = build(bundle.en, enrichResult?.en ?? "", measured?.en ?? "", template?.en ?? "");
-        const прежний = lang === "ru" ? draftRu : draftEn;
-        const новый = lang === "ru" ? ru : en;
-
-        setDraftRu(ru);
-        setDraftEn(en);
-        setDirty(true);
+        applyModeStore.save(mode);
+        setРучнаяПравка(null);
         setLang("ru");
         setView("prompt");
+
+        const собрано = собратьТекст(mode, {
+          local: { ru: bundle.ru, en: bundle.en },
+          answer: enrichResult,
+          analysis,
+          meta,
+          style: стильРолика,
+          flags: флагиРолика,
+        });
+        const прежний = lang === "ru" ? draftRu : draftEn;
+        const новый = собрано.ru;
+        const measured = analysis && meta ? measurementLines(analysis, meta) : null;
+
         /*  Ответ модели — три-пять предложений, и блок замеров уходит вниз,
             за край окна промпта. Прокручиваем к нему.                   */
-        const mark = ru.indexOf(MEASURED_HEAD);
-        setScrollHint(mark >= 0 && ru.length ? { share: mark / ru.length, key: Date.now() } : null);
+        const mark = новый.indexOf(MEASURED_HEAD);
+        setScrollHint(mark >= 0 && новый.length ? { share: mark / новый.length, key: Date.now() } : null);
         setApplied({ mode, length: новый.length, key: Date.now() });
 
         скажем("собрано", {
           сталоЗнаков: новый.length,
+          отрезков: segments.length,
           ответМоделиЗнаков: (enrichResult?.ru ?? "").length,
           замеры: measured ? `${measured.ru.split("\n").length} строк` : "не собрались",
           текстИзменился: новый !== прежний,
         });
 
-        if (mode === "template" && !template) {
-          pushToast("error", "Шаблон не собрался", "Нужен ответ модели: нажмите «Описать кадры моделью»");
-        } else if (mode === "both" && !measured) {
+        if (segments.length) {
+          pushToast("success", "Промпты отрезков пересобраны", `Отрезков: ${segments.length}`);
+          if (!enrichResult) return;
+        }
+        if (mode === "both" && !measured) {
           pushToast("error", "Замеры не готовы", "Подставлено только описание модели");
         } else if (новый === прежний) {
           pushToast(
@@ -1139,8 +1163,8 @@ export function Workspace() {
           );
         } else if (mode === "metrics") {
           pushToast("success", "Промпт собран из измерений");
-        } else if (mode === "template" && template) {
-          const слотов = [/ГЕРОЯ/, /ПРОДУКТА/, /ЛОКАЦИИ/].filter((с) => с.test(template.ru)).length;
+        } else if (mode === "template") {
+          const слотов = [/ГЕРОЯ/, /ПРОДУКТА/, /ЛОКАЦИИ/].filter((с) => с.test(новый)).length;
           pushToast("success", "Шаблон со слотами собран", `Слотов в кадре: ${слотов}`);
         } else if (mode === "both" && measured) {
           pushToast("success", "Описание модели и замеры вместе", `Строк замеров: ${measured.ru.split("\n").length}`);
@@ -1153,7 +1177,7 @@ export function Workspace() {
         pushToast("error", "Режим не сработал", текст);
       }
     },
-    [analysis, bundle, draftEn, draftRu, enrichResult, lang, meta, preset, pushToast, segments],
+    [analysis, bundle, draftEn, draftRu, enrichResult, lang, meta, pushToast, segments, стильРолика, флагиРолика],
   );
 
   const save = useCallback(async () => {
@@ -1272,9 +1296,8 @@ export function Workspace() {
     setEnrichResult(null);
     setEnrichError(null);
     setTags(item.subjectTags || "");
-    setDraftRu(item.promptRu);
-    setDraftEn(item.promptEn);
-    setDirty(true);
+    // Из истории берём сохранённый текст как ручной: он старше режимов.
+    setРучнаяПравка({ ru: item.promptRu, en: item.promptEn });
     setSaveState("saved");
     setSavedId(item.id);
     setPhase("ready");
@@ -1330,10 +1353,8 @@ export function Workspace() {
     setPhase("idle");
     setProgress(null);
     setFatal(null);
-    setDirty(false);
     setTags("");
-    setDraftRu("");
-    setDraftEn("");
+    setРучнаяПравка(null);
     setSaveState("idle");
     setSavedId(null);
     setEnrichState("idle");
@@ -1540,13 +1561,7 @@ export function Workspace() {
                   draft={draft}
                   draftEn={draftEn}
                   onDraftChange={setDraft}
-                  onResetDraft={() => {
-                    setDirty(false);
-                    if (bundle) {
-                      setDraftRu(bundle.ru);
-                      setDraftEn(bundle.en);
-                    }
-                  }}
+                  onResetDraft={() => setРучнаяПравка(null)}
                   onDownload={downloadPrompt}
                   enrichState={enrichState}
                   enrichResult={enrichResult}
@@ -1554,6 +1569,7 @@ export function Workspace() {
                   onEnrich={() => void enrich()}
                   onApplyEnrich={applyEnrich}
                   applyMode={applyMode}
+                  hasAnswer={ответЕсть}
                   frameCount={frameCount}
                   onFrameCountChange={(n) => frameCountStore.save(n)}
                   frameLimit={frameLimitInfo}
@@ -1562,7 +1578,7 @@ export function Workspace() {
                   bySegments={bySegments}
                   onBySegmentsChange={setBySegments}
                   segmentCount={meta ? splitIntoSegments(meta.durationSec).length : 0}
-                  segments={segments}
+                  segments={отрезки}
                   segmentProgress={segmentProgress}
                   segmentsCombined={склеенныеОтрезки}
                   onDismissEnrich={() => {
