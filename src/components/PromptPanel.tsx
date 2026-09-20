@@ -109,6 +109,7 @@ export function PromptPanel({
   segmentCount,
   segments,
   segmentProgress,
+  segmentsCombined,
   onDismissEnrich,
   saveState,
   onSave,
@@ -148,6 +149,8 @@ export function PromptPanel({
   segmentCount: number;
   segments: SegmentResult[];
   segmentProgress: { done: number; total: number } | null;
+  /** все отрезки одним текстом: сквозные блоки сверху, дальше сцены */
+  segmentsCombined: { ru: string; en: string };
   onDismissEnrich: () => void;
   saveState: SaveState;
   onSave: () => void;
@@ -546,7 +549,17 @@ export function PromptPanel({
              свой промпт в выбранном режиме и своя кнопка копирования. */}
         {segments.length ? (
           <div className="animate-rise mt-3 space-y-2.5">
-            <p className="hud-label">Отрезки · {segments.length}</p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="hud-label">Отрезки · {segments.length}</p>
+              <button
+                type="button"
+                className="btn px-2.5 py-1 text-[11.5px]"
+                title="Один текст: сквозные блоки сверху, дальше отрезки по порядку"
+                onClick={() => copy(segmentsCombined[lang], "все-отрезки")}
+              >
+                {copied === "все-отрезки" ? "Скопировано" : "Копировать все отрезки"}
+              </button>
+            </div>
             {segments.map((отрезок) => (
               <div key={отрезок.index} className="rounded-lg border border-line-soft bg-void/50 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">

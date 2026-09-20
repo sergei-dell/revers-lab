@@ -35,6 +35,18 @@ export type TemplateSource = {
   meta: VideoMeta | null;
   /** «--ar 16:9 --duration 10» из промпта измерений */
   flags: string;
+  /*  СКВОЗНЫЕ БЛОКИ при разборе по отрезкам. GLOBAL, Exclusions и
+      INVARIANT считаются один раз по всему ролику и в каждый отрезок
+      попадают одинаковыми: иначе куски генерируются в разном стиле и не
+      склеиваются в один ролик. Меняются только CORE SCENE и TIMELINE. */
+  shared?: {
+    /** поля разбора, собранные по всем отрезкам */
+    answer: { camera: string; light: string; color: string; texture: string; negative: string };
+    /** какие слоты вообще есть в ролике: одинаковые во всех отрезках */
+    slots: { hero: boolean; product: boolean; place: boolean };
+  };
+  /** границы отрезка: его время в TIMELINE и его планы */
+  range?: { start: number; end: number };
   /** выбранный стилевой пресет: строка Style в блоке GLOBAL */
   style: { ru: string; en: string };
 };
@@ -115,9 +127,22 @@ function replaceNear(sentence: string, keywords: RegExp, slot: string): { text: 
   if (!найдено || найдено.index === undefined) return { text: sentence, used: false };
   const начало = найдено.index;
   const конец = начало + найдено[0].length;
-  // Определения слева: одно-два слова («молодая женщина», «стеклянная бутылка»).
-  const слева = sentence.slice(0, начало).match(/(?:\p{L}+\s+){0,2}$/u);
-  const срез = слева && слева[0] && !/^(?:и|а|но|the|a|an)\s+$/iu.test(слева[0]) ? начало - слева[0].length : начало;
+  /*  Слева забираем только определения: «молодая женщина», «стеклянная
+      бутылка», «a young woman». Глаголы и другие существительные не
+      трогаем — иначе из сцены пропадает действие: «в кадр входит мужчина»
+      превращалось в один слот.                                        */
+  const ОПРЕДЕЛЕНИЕ = /(?:\p{L}*(?:ый|ий|ой|ая|яя|ое|ее|ые|ие|ого|ому)|a|an|the|young|old|tall|small|big|new)$/iu;
+  const словаСлева = sentence.slice(0, начало).trimEnd().split(/\s+/);
+  let взято = 0;
+  while (взято < 2 && словаСлева.length - взято > 0) {
+    const слово = словаСлева[словаСлева.length - 1 - взято];
+    if (!слово || !ОПРЕДЕЛЕНИЕ.test(слово.replace(/[^\p{L}]/gu, ""))) break;
+    взято += 1;
+  }
+  const длинаСлева = взято
+    ? словаСлева.slice(словаСлева.length - взято).join(" ").length + взято
+    : 0;
+  const срез = начало - длинаСлева;
   // Описание справа: «лет тридцати», «в красном дождевике», «wearing a coat».
   const хвост = sentence
     .slice(конец)
@@ -161,6 +186,38 @@ function surfaceWord(source: TemplateSource, lang: "ru" | "en"): string {
   return lang === "ru" ? "свободная плоская поверхность" : "free flat surface";
 }
 
+/*  Какие слоты есть у ролика вообще. Считается один раз по всем ответам
+    модели, чтобы у отрезков был один набор референсов.               */
+/*  Разбор готового шаблона на блоки: нужен, чтобы склеить все отрезки в
+    один текст — сквозные блоки сверху один раз, дальше сцены по порядку. */
+export function splitTemplate(text: string): {
+  shared: string;
+  perSegment: string;
+} {
+  const строки = text.split("\n");
+  const сквозные: string[] = [];
+  const своё: string[] = [];
+  let куда: "shared" | "own" = "shared";
+  for (const строка of строки) {
+    if (/^CORE SCENE:/.test(строка)) куда = "own";
+    else if (/^GLOBAL:/.test(строка)) куда = "shared";
+    else if (/^TIMELINE:/.test(строка)) куда = "own";
+    else if (/^INVARIANT:/.test(строка)) куда = "shared";
+    else if (/^--ar /.test(строка)) куда = "own";
+    (куда === "shared" ? сквозные : своё).push(строка);
+  }
+  const подчистить = (список: string[]) => список.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return { shared: подчистить(сквозные), perSegment: подчистить(своё) };
+}
+
+export function слотыРолика(текст: string): { hero: boolean; product: boolean; place: boolean } {
+  return {
+    hero: ЛЮДИ.test(текст) && !НЕТ_ЛЮДЕЙ.test(текст),
+    product: ПРЕДМЕТЫ.test(текст),
+    place: МЕСТА.test(текст) || Boolean(текст.trim()),
+  };
+}
+
 export function buildTemplatePrompt(source: TemplateSource): { ru: string; en: string } {
   const сделать = (lang: "ru" | "en") => {
     const a = source.analysis;
@@ -171,9 +228,16 @@ export function buildTemplatePrompt(source: TemplateSource): { ru: string; en: s
     // Смотрим весь ответ модели: она называет героя и предмет где угодно —
     // в subject, в описании среды, во второй фразе промпта.
     const всёОписание = `${ответ.subject} ${ответ.environment} ${описание}`;
-    const нуженГерой = ЛЮДИ.test(всёОписание) && !НЕТ_ЛЮДЕЙ.test(всёОписание);
-    const нуженПродукт = ПРЕДМЕТЫ.test(всёОписание);
-    const нужноМесто = Boolean(ответ.environment.trim()) || МЕСТА.test(всёОписание);
+    const своиСлоты = {
+      hero: ЛЮДИ.test(всёОписание) && !НЕТ_ЛЮДЕЙ.test(всёОписание),
+      product: ПРЕДМЕТЫ.test(всёОписание),
+      place: Boolean(ответ.environment.trim()) || МЕСТА.test(всёОписание),
+    };
+    // Сквозные слоты задают, какие референсы есть у ролика вообще; в самом
+    // отрезке слот ставится там, где ему есть что заменить.
+    const нуженГерой = своиСлоты.hero;
+    const нуженПродукт = своиСлоты.product;
+    const нужноМесто = своиСлоты.place || Boolean(source.shared?.slots.place);
 
     const основа =
       pickSentence(описание, нуженГерой ? ЛЮДИ : нуженПродукт ? ПРЕДМЕТЫ : null) || ответ.subject;
@@ -215,20 +279,28 @@ export function buildTemplatePrompt(source: TemplateSource): { ru: string; en: s
     ].filter(Boolean);
 
     // ── REFERENCES ───────────────────────────────────────────────────
+    // Список референсов у ролика один: он не может меняться от отрезка к
+    // отрезку, иначе куски снимаются по разным исходникам.
+    const общиеСлотыДляСсылок = source.shared?.slots;
+    const показать = {
+      hero: общиеСлотыДляСсылок ? общиеСлотыДляСсылок.hero : геройПоставлен,
+      product: общиеСлотыДляСсылок ? общиеСлотыДляСсылок.product : продуктПоставлен,
+      place: общиеСлотыДляСсылок ? общиеСлотыДляСсылок.place : местоПоставлено,
+    };
     const references: string[] = [];
-    if (геройПоставлен) {
+    if (показать.hero) {
       references.push(
         `${SLOT_HERO} defines face, hair, skin tone and build.`,
         "Do not use its background, clothing or lighting.",
       );
     }
-    if (продуктПоставлен) {
+    if (показать.product) {
       references.push(
         `${SLOT_PRODUCT} defines the exact object: shape, proportions, materials, colour.`,
         "Do not reproduce any printed text on it, render surfaces blank. Do not use its background.",
       );
     }
-    if (местоПоставлено) {
+    if (показать.place) {
       references.push(
         `${SLOT_PLACE} defines the environment only: surfaces, depth, light sources.`,
         "Do not take people or objects from it.",
@@ -240,16 +312,19 @@ export function buildTemplatePrompt(source: TemplateSource): { ru: string; en: s
     // генератор разбирает хуже, да и глазом её не прочесть.
     const камера = a ? (CAMERA_LABELS[a.camera] ?? { ru: "камера не определена", en: "camera undetermined" }) : null;
     const палитра = (a?.palette ?? []).slice(0, 5).map((p) => p.hex).join(", ");
+    const общий = source.shared?.answer;
+    const поле = (имя: "camera" | "light" | "color" | "texture") =>
+      (общий ? общий[имя] : ответ[имя]).trim();
     const стиль = (lang === "ru" ? source.style.ru : source.style.en).trim();
     const движение = камера ? (lang === "ru" ? камера.ru : камера.en) : "";
-    const строкаКамеры = [ответ.camera.trim(), движение].filter(Boolean).join(", ");
-    const строкаЦвета = [ответ.color.trim(), палитра].filter(Boolean).join(", ");
+    const строкаКамеры = [поле("camera"), движение].filter(Boolean).join(", ");
+    const строкаЦвета = [поле("color"), палитра].filter(Boolean).join(", ");
     const global = [
       стиль ? `Style: ${стиль}` : "",
       строкаКамеры ? `Camera: ${строкаКамеры}` : "",
-      ответ.light.trim() ? `Light: ${ответ.light.trim()}` : "",
+      поле("light") ? `Light: ${поле("light")}` : "",
       строкаЦвета ? `Colour: ${строкаЦвета}` : "",
-      ответ.texture.trim() ? `Texture: ${ответ.texture.trim()}` : "",
+      поле("texture") ? `Texture: ${поле("texture")}` : "",
     ].filter(Boolean);
 
     /*  ЗАПРЕТЫ ЦЕЛИКОМ. Раньше список обрезался десятью позициями, и
@@ -257,7 +332,8 @@ export function buildTemplatePrompt(source: TemplateSource): { ru: string; en: s
         плюс наши постоянные запреты, без повторов.                   */
     const запреты: string[] = [];
     const видели = new Set<string>();
-    for (const кусок of ["no text, no letters, no logos, no watermarks", ответ.negative].join(", ").split(/[,;\n]/)) {
+    const негатив = общий ? общий.negative : ответ.negative;
+    for (const кусок of ["no text, no letters, no logos, no watermarks", негатив].join(", ").split(/[,;\n]/)) {
       const чистый = кусок.trim().replace(/\s+/g, " ");
       const ключ = чистый.toLowerCase();
       if (!чистый || видели.has(ключ)) continue;
@@ -266,9 +342,19 @@ export function buildTemplatePrompt(source: TemplateSource): { ru: string; en: s
     }
 
     // ── TIMELINE ─────────────────────────────────────────────────────
-    const сцены = a?.scenes?.length
+    const отрезок = source.range;
+    const всеСцены = a?.scenes?.length
       ? a.scenes
       : [{ index: 0, start: 0, end: source.meta?.durationSec ?? 0, keyframe: 0, intensity: 0 }];
+    // У отрезка в TIMELINE только его планы и его время.
+    const внутри = отрезок
+      ? всеСцены
+          .filter((с) => с.end > отрезок.start && с.start < отрезок.end)
+          .map((с) => ({ ...с, start: Math.max(с.start, отрезок.start), end: Math.min(с.end, отрезок.end) }))
+      : всеСцены;
+    const сцены = внутри.length
+      ? внутри
+      : [{ index: 0, start: отрезок?.start ?? 0, end: отрезок?.end ?? 0, keyframe: 0, intensity: 0 }];
     // Реклама ляжет туда, где меньше движения: самый спокойный план.
     const спокойный = сцены.reduce((лучший, с) => (с.intensity < лучший.intensity ? с : лучший), сцены[0]);
     const timeline = сцены.map((с, и) => {
@@ -285,11 +371,17 @@ export function buildTemplatePrompt(source: TemplateSource): { ru: string; en: s
     });
 
     // ── INVARIANT ────────────────────────────────────────────────────
+    const общиеСлоты = source.shared?.slots;
+    const вИнварианте = общиеСлоты
+      ? [общиеСлоты.hero ? SLOT_HERO : "", общиеСлоты.product ? SLOT_PRODUCT : "", общиеСлоты.place ? SLOT_PLACE : ""].filter(Boolean)
+      : слоты;
     const invariant: string[] = [];
-    for (const слот of слоты) {
+    for (const слот of вИнварианте) {
       invariant.push(`${слот} keeps its identity in every frame`);
     }
-    if (продуктПоставлен) invariant.push("product surfaces stay blank for a logo");
+    if (общиеСлоты ? общиеСлоты.product : продуктПоставлен) {
+      invariant.push("product surfaces stay blank for a logo");
+    }
     invariant.push("no text anywhere in frame");
 
     return [

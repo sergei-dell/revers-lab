@@ -40,6 +40,7 @@ import {
   mergeTags,
   slugify,
   uid,
+  uniqueTags,
 } from "@/lib/format";
 import { buildPrompt, measurementLines, metricReadouts, STYLE_PRESETS, type StylePreset } from "@/lib/prompt";
 import {
@@ -51,7 +52,7 @@ import {
 import { readHistory, writeHistory } from "@/lib/localHistory";
 import { createChoiceStore, useChoice } from "@/lib/prefs";
 import { segmentLabel, splitIntoSegments, type Segment } from "@/lib/segments";
-import { buildTemplatePrompt } from "@/lib/templatePrompt";
+import { buildTemplatePrompt, splitTemplate, слотыРолика } from "@/lib/templatePrompt";
 import { STATIC_BUILD } from "@/lib/staticMode";
 import { analysisFromRow, toStoredMetrics } from "@/lib/store";
 import type {
@@ -81,6 +82,27 @@ import { readContainerFps } from "@/lib/video/containerFps";
 
 type Phase = "idle" | "decoding" | "probing" | "analyzing" | "ready";
 
+/*  СКВОЗНЫЕ ДАННЫЕ ПО ВСЕМУ РОЛИКУ. Из всех ответов модели собираются
+    общие поля и общий набор слотов: GLOBAL, Exclusions, REFERENCES и
+    INVARIANT обязаны быть у отрезков одинаковыми, иначе куски снимаются
+    в разном стиле и не склеиваются в один ролик.                     */
+function сквозное(ответы: EnrichAnswer[]) {
+  const первое = (поле: "camera" | "light" | "color" | "texture") =>
+    ответы.map((о) => о[поле].trim()).find(Boolean) ?? "";
+  const негатив = uniqueTags(ответы.map((о) => о.negative)).join(", ");
+  const всёВместе = ответы.map((о) => `${о.subject} ${о.environment} ${о.ru} ${о.en}`).join(" ");
+  return {
+    answer: {
+      camera: первое("camera"),
+      light: первое("light"),
+      color: первое("color"),
+      texture: первое("texture"),
+      negative: негатив,
+    },
+    slots: слотыРолика(всёВместе),
+  };
+}
+
 /*  СБОРКА ТЕКСТА РЕЖИМА — одна на всех: и для окна промпта, и для каждого
     отрезка при разборе по кускам. Второй такой же сборки быть не должно:
     разойдутся при первой правке.                                       */
@@ -93,14 +115,18 @@ function собратьТекст(
     meta: VideoMeta | null;
     style: { ru: string; en: string };
     flags: string;
+    shared?: ReturnType<typeof сквозное>;
+    range?: { start: number; end: number };
   },
 ): { ru: string; en: string } {
-  const { local, answer, analysis, meta, style, flags } = части;
+  const { local, answer, analysis, meta, style, flags, shared, range } = части;
   // Промпт измерений тоже проходит через флаги: у отрезка своя длительность.
   if (!answer) return local;
   const measured = analysis && meta ? measurementLines(analysis, meta) : null;
   const template =
-    mode === "template" ? buildTemplatePrompt({ answer, analysis, meta, flags, style }) : null;
+    mode === "template"
+      ? buildTemplatePrompt({ answer, analysis, meta, flags, style, shared, range })
+      : null;
   const собрать = (язык: "ru" | "en") => {
     if (mode === "metrics") return local[язык];
     if (mode === "template") return template ? template[язык] : local[язык];
@@ -837,26 +863,31 @@ export function Workspace() {
           negative: ответ.negative ?? "",
           action: ответ.action ?? [],
         };
-        // Длительность в флагах — своя у каждого отрезка.
-        const метаОтрезка: VideoMeta = { ...meta, durationSec: кусок.end - кусок.start };
-        const флагиОтрезка = флаги.replace(/--duration \d+/, `--duration ${Math.max(1, Math.round(метаОтрезка.durationSec))}`);
-        const свой = { ru: bundle.ru, en: bundle.en };
         собранные.push({
           index: кусок.index,
           label: segmentLabel(кусок),
           start: кусок.start,
           end: кусок.end,
           answer,
-          prompt: собратьТекст(applyMode, {
-            local: свой,
-            answer,
-            analysis,
-            meta: метаОтрезка,
-            style: стиль,
-            flags: флагиОтрезка,
-          }),
+          prompt: { ru: "", en: "" },
         });
-        setSegments([...собранные]);
+        /*  Сквозные блоки считаются по всем собранным ответам, поэтому
+            после каждого нового отрезка промпты пересобираются целиком. */
+        const общее = сквозное(собранные.map((о) => о.answer));
+        for (const о of собранные) {
+          const длина = Math.max(1, Math.round(о.end - о.start));
+          о.prompt = собратьТекст(applyMode, {
+            local: { ru: bundle.ru, en: bundle.en },
+            answer: о.answer,
+            analysis,
+            meta: { ...meta, durationSec: о.end - о.start },
+            style: стиль,
+            flags: флаги.replace(/--duration \d+/, `--duration ${длина}`),
+            shared: общее,
+            range: { start: о.start, end: о.end },
+          });
+        }
+        setSegments(собранные.map((о) => ({ ...о })));
         setSegmentProgress({ done: собранные.length, total: куски.length });
       }
       setEnrichState("done");
@@ -871,6 +902,25 @@ export function Workspace() {
       setSegmentProgress(null);
     }
   }, [analysis, applyMode, bundle, meta, preset, pushToast, снятьКадры, спроситьМодель]);
+
+  /*  ВСЕ ОТРЕЗКИ ОДНИМ ТЕКСТОМ: сквозные блоки идут сверху один раз,
+      дальше отрезки по порядку со своим временем. В шаблоне блоки видны
+      по заголовкам, в остальных режимах текст отрезка идёт целиком.   */
+  const склеенныеОтрезки = useMemo(() => {
+    if (!segments.length) return { ru: "", en: "" };
+    const склеить = (язык: "ru" | "en") => {
+      if (applyMode === "template") {
+        const общее = splitTemplate(segments[0].prompt[язык]).shared;
+        const куски = segments.map((о) => {
+          const своё = splitTemplate(о.prompt[язык]).perSegment;
+          return `Отрезок ${о.index + 1} · ${о.label}\n${своё}`;
+        });
+        return [общее, ...куски].join("\n\n");
+      }
+      return segments.map((о) => `Отрезок ${о.index + 1} · ${о.label}\n${о.prompt[язык]}`).join("\n\n");
+    };
+    return { ru: склеить("ru"), en: склеить("en") };
+  }, [applyMode, segments]);
 
   const enrich = useCallback(async () => {
     if (!analysis || !bundle) return;
@@ -1005,6 +1055,7 @@ export function Workspace() {
         if (segments.length) {
           const стиль = STYLE_PRESETS.find((p) => p.id === preset) ?? { ru: "", en: "" };
           const флаги = (bundle.ru.match(/--ar \S+ --duration \d+/) ?? [])[0] ?? "";
+          const общее = сквозное(segments.map((о) => о.answer));
           setSegments((прежние) =>
             прежние.map((отрезок) => {
               // Длительность в флагах — своя у каждого отрезка, не всего ролика.
@@ -1018,6 +1069,8 @@ export function Workspace() {
                   meta: meta ? { ...meta, durationSec: отрезок.end - отрезок.start } : meta,
                   style: стиль,
                   flags: флаги.replace(/--duration \d+/, `--duration ${длина}`),
+                  shared: общее,
+                  range: { start: отрезок.start, end: отрезок.end },
                 }),
               };
             }),
@@ -1511,6 +1564,7 @@ export function Workspace() {
                   segmentCount={meta ? splitIntoSegments(meta.durationSec).length : 0}
                   segments={segments}
                   segmentProgress={segmentProgress}
+                  segmentsCombined={склеенныеОтрезки}
                   onDismissEnrich={() => {
                     setEnrichState("idle");
                     setEnrichResult(null);
