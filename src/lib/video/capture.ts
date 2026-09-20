@@ -1,3 +1,4 @@
+import { ближайшаяЧастота } from "@/lib/video/containerFps";
 import { uid } from "@/lib/format";
 import type { FrameShot } from "@/lib/types";
 
@@ -145,18 +146,9 @@ export async function probeFps(
   return fallback;
 }
 
+// Список реальных частот — один на весь проект, в containerFps.
 function snapFps(raw: number): number {
-  const candidates = [23.976, 24, 25, 29.97, 30, 48, 50, 59.94, 60, 120];
-  let best = candidates[0];
-  let diff = Infinity;
-  for (const c of candidates) {
-    const d = Math.abs(raw - c);
-    if (d < diff) {
-      diff = d;
-      best = c;
-    }
-  }
-  return diff / best < 0.06 ? best : Number(raw.toFixed(2));
+  return ближайшаяЧастота(raw) ?? 30;
 }
 
 export function seekVideo(video: HTMLVideoElement, time: number): Promise<void> {

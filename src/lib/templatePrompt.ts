@@ -183,7 +183,8 @@ function beatFor(action: TemplateSource["answer"]["action"], middle: number): st
 function surfaceWord(source: TemplateSource, lang: "ru" | "en"): string {
   const текст = `${source.answer.environment} ${source.answer.texture}`;
   const найдено = текст.match(ПОВЕРХНОСТИ);
-  if (найдено) return найдено[0];
+  // В английский промпт русское слово не ставим: генератор его не поймёт.
+  if (найдено && !(lang === "en" && /[а-яё]/i.test(найдено[0]))) return найдено[0];
   return lang === "ru" ? "свободная плоская поверхность" : "free flat surface";
 }
 
@@ -374,7 +375,11 @@ export function buildTemplatePrompt(source: TemplateSource): { ru: string; en: s
       строки.push(`  Act: ${такт || (lang === "ru" ? "продолжение действия" : "action continues")}`);
       if (с === спокойный) {
         строки.push(
-          `  сюда ляжет реклама: ${surfaceWord(source, lang)}, ${lang === "ru" ? `план ${и + 1}` : `shot ${и + 1}`}`,
+          /*  Слово «реклама» уже стоит в стиле рекламного пресета — здесь
+              пишем «врезка», чтобы оно не повторялось в одном промпте. */
+          lang === "ru"
+            ? `  сюда ляжет врезка: ${surfaceWord(source, lang)}, план ${и + 1}`
+            : `  ad placement here: ${surfaceWord(source, lang)}, shot ${и + 1}`,
         );
       }
       return строки.join("\n");

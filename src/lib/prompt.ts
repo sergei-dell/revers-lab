@@ -190,6 +190,18 @@ function subjectPhrase(tags: string) {
     истории, и одно неожиданное значение роняло целое нажатие.        */
 const число = (v: unknown, запас = 0) => (typeof v === "number" && Number.isFinite(v) ? v : запас);
 const доля = (v: unknown) => (число(v) * 100).toFixed(1);
+
+/*  Если у ролика чёрные поля, размер файла и формат кадра расходятся:
+    файл широкий, картинка вертикальная. Пишем оба, чтобы не выглядело
+    ошибкой.                                                          */
+function полеКартинки(a: Analysis): { ru: string; en: string } {
+  const p = a.picture;
+  if (!p || p.bars === "нет") return { ru: "", en: "" };
+  return {
+    ru: `, картинка ${p.width}×${p.height} без чёрных полей`,
+    en: `, picture ${p.width}x${p.height} excluding black bars`,
+  };
+}
 const подписьКамеры = (камера: Analysis["camera"]) =>
   CAMERA_LABELS[камера] ?? { ru: "камера не определена", en: "camera undetermined" };
 
@@ -227,14 +239,14 @@ export function measurementLines(a: Analysis, meta: VideoMeta): { ru: string; en
       `Камера: ${camera.ru} (${confidence}% уверенности), ${motionRu}.`,
       `Монтаж: ${cuts.ru}.`,
       `Фактура: ${grainRu}, детализация ${доля(a.edges)}%.`,
-      `Съёмка: ${meta.width}×${meta.height} (${meta.aspect}), ${число(meta.durationSec).toFixed(1)} с, ${meta.fps} к/с.`,
+      `Съёмка: ${meta.width}×${meta.height}${полеКартинки(a).ru} (${meta.aspect}), ${число(meta.durationSec).toFixed(1)} с, ${meta.fps} к/с.`,
     ].join("\n"),
     en: [
       `Palette: ${paletteEn}.`,
       `Camera: ${camera.en} (${confidence}% confidence), ${motionEn}.`,
       `Editing: ${cuts.en}.`,
       `Texture: ${grainEn}, detail ${доля(a.edges)}%.`,
-      `Source: ${meta.width}x${meta.height} (${meta.aspect}), ${число(meta.durationSec).toFixed(1)}s, ${meta.fps} fps.`,
+      `Source: ${meta.width}x${meta.height}${полеКартинки(a).en} (${meta.aspect}), ${число(meta.durationSec).toFixed(1)}s, ${meta.fps} fps.`,
     ].join("\n"),
   };
 }
@@ -272,8 +284,8 @@ export function buildPrompt(input: {
   const flags = `${ar} --duration ${durationFlag(meta.durationSec, style.id)}`;
 
   const tech = {
-    ru: `${meta.width}×${meta.height} (${meta.aspect}), ${число(meta.durationSec).toFixed(1)} с, ${meta.fps} к/с`,
-    en: `${meta.width}x${meta.height} (${meta.aspect}), ${число(meta.durationSec).toFixed(1)}s, ${meta.fps} fps`,
+    ru: `${meta.width}×${meta.height}${полеКартинки(a).ru} (${meta.aspect}), ${число(meta.durationSec).toFixed(1)} с, ${meta.fps} к/с`,
+    en: `${meta.width}x${meta.height}${полеКартинки(a).en} (${meta.aspect}), ${число(meta.durationSec).toFixed(1)}s, ${meta.fps} fps`,
   };
 
   const ruParts = [

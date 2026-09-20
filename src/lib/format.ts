@@ -23,6 +23,7 @@ const RATIOS: Array<[number, number, string]> = [
   [1, 1, "1:1"],
   [4, 3, "4:3"],
   [16, 9, "16:9"],
+  [21, 9, "21:9"],
 ];
 
 export function aspectLabel(w: number, h: number): string {
@@ -53,7 +54,14 @@ export function uniqueTags(...sources: Array<string | string[] | undefined | nul
     for (const part of parts) {
       const tag = part.trim().replace(/\s+/g, " ");
       if (!tag) continue;
-      const key = tag.toLocaleLowerCase("ru");
+      /*  Ключ сравнения без регистра, дефисов и знаков: «Rainy Night»,
+          «rainy night» и «rainy-night» — один и тот же тег, и в промпте
+          он должен стоять один раз.                                   */
+      const key = tag
+        .toLocaleLowerCase("ru")
+        .replace(/[-_.,;:!?'"«»()]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
       if (seen.has(key)) continue;
       seen.add(key);
       out.push(tag);

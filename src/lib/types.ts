@@ -86,6 +86,10 @@ export type Analysis = {
   dominantHues: string[];
   stats: FrameStat[];
   exposure: "low-key" | "mid" | "high-key";
+  /*  Размер самой картинки без чёрных полей и какие поля нашлись.
+      По нему считается формат кадра: вертикальный ролик внутри широкого
+      файла — это 9:16, а не 16:9.                                    */
+  picture?: { width: number; height: number; bars: "нет" | "по бокам" | "сверху и снизу" };
 };
 
 export type PromptBundle = {

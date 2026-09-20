@@ -1,5 +1,6 @@
 import { clamp, rgbToHex } from "@/lib/format";
 import { seekVideo, makeCanvas, drawVideo } from "@/lib/video/capture";
+import { рамкаКартинки, размерКартинки, type Рамка } from "@/lib/video/letterbox";
 import type {
   Analysis,
   CameraMove,
@@ -224,6 +225,8 @@ export async function analyzeVideo(
   const hueWeights = new Map<string, number>();
 
   const stats: FrameStat[] = [];
+  // Где в каждом кадре сама картинка — по этому считаются чёрные поля.
+  const рамки: Рамка[] = [];
   let prevGray: Float32Array | null = null;
   let prevTime = 0;
 
@@ -242,6 +245,7 @@ export async function analyzeVideo(
       );
     }
     const data = imageData.data;
+    рамки.push(рамкаКартинки(data, aw, ah));
     const gray = toGray(data, aw, ah);
 
     let lumaSum = 0;
@@ -475,6 +479,14 @@ export async function analyzeVideo(
   const avg = (pick: (s: FrameStat) => number) =>
     stats.reduce((a, s) => a + pick(s), 0) / (stats.length || 1);
 
+  /*  Картинка без полей — в пикселях исходника, а не разборного кадра. */
+  const кадр = размерКартинки(рамки, aw, ah);
+  const picture = {
+    width: Math.max(1, Math.round((кадр.width * w0) / aw)),
+    height: Math.max(1, Math.round((кадр.height * h0) / ah)),
+    bars: кадр.поля,
+  };
+
   const brightness = avg((s) => s.luma);
   const contrastMean = avg((s) => s.contrast);
   const exposure: Analysis["exposure"] =
@@ -505,6 +517,7 @@ export async function analyzeVideo(
     dominantHues,
     stats,
     exposure,
+    picture,
   };
 }
 

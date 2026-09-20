@@ -79,7 +79,7 @@ import {
   type ImageFormatId,
 } from "@/lib/video/capture";
 import { analyzeVideo, CAMERA_LABELS } from "@/lib/video/analyze";
-import { readContainerFps } from "@/lib/video/containerFps";
+import { readContainerFps, ближайшаяЧастота } from "@/lib/video/containerFps";
 
 type Phase = "idle" | "decoding" | "probing" | "analyzing" | "ready";
 
@@ -575,6 +575,14 @@ export function Workspace() {
         });
         if (cancelled) return;
         setAnalysis(result);
+        /*  ФОРМАТ КАДРА — ПО КАРТИНКЕ, А НЕ ПО РАЗМЕРУ ФАЙЛА. Вертикальный
+            ролик внутри широкого файла раньше уезжал в 16:9 или 4:3:
+            чёрные поля считались частью кадра.                        */
+        const картинка = result.picture;
+        if (картинка && картинка.bars !== "нет") {
+          const поКартинке = aspectLabel(картинка.width, картинка.height);
+          setMeta((прежняя) => (прежняя ? { ...прежняя, aspect: поКартинке } : прежняя));
+        }
 
         // thumbnail for history
         try {
@@ -894,7 +902,7 @@ export function Workspace() {
         const answer: EnrichAnswer = {
           ru: ответ.ru ?? "",
           en: ответ.en ?? "",
-          tags: ответ.tags ?? [],
+          tags: uniqueTags(ответ.tags ?? []),
           subject: ответ.subject ?? "",
           environment: ответ.environment ?? "",
           camera: ответ.camera ?? "",
@@ -1044,7 +1052,8 @@ export function Workspace() {
       setEnrichResult({
         ru: data.ru ?? "",
         en: data.en ?? "",
-        tags: data.tags ?? [],
+        // Теги модели — без повторов: она любит повторить одно и то же дважды.
+        tags: uniqueTags(data.tags ?? []),
         subject: data.subject ?? "",
         environment: data.environment ?? "",
         camera: data.camera ?? "",
@@ -1283,7 +1292,8 @@ export function Workspace() {
       durationSec: Number(item.durationSec),
       width: item.width,
       height: item.height,
-      fps: Number(item.fps),
+      // Из истории могли прийти старые дробные частоты — приводим к реальной.
+      fps: ближайшаяЧастота(Number(item.fps)) ?? 30,
       fpsDetected: true,
       sizeBytes: item.sizeBytes,
       mime: "video/mp4",

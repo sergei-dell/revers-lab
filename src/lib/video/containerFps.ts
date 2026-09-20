@@ -29,14 +29,22 @@ export async function readContainerFps(file: Blob): Promise<number | null> {
   return null;
 }
 
-// Частоты вроде 23.976 в контейнере записаны дробью — округляем к привычным.
-function snap(fps: number | null): number | null {
-  if (!fps || !Number.isFinite(fps) || fps < 1 || fps > 1000) return null;
-  const known = [23.976, 24, 25, 29.97, 30, 48, 50, 59.94, 60, 90, 100, 119.88, 120, 240];
+/*  ЧАСТОТЫ, КОТОРЫЕ БЫВАЮТ НА САМОМ ДЕЛЕ. Любое измеренное значение
+    приводится к ближайшему из них — без исключений. Раньше сильно
+    разошедшееся значение отдавалось как есть, и в промпт попадали
+    26.7, 30.531, 35.02 и 59.723 к/с: таких частот у видео не бывает. */
+const ЧАСТОТЫ = [23.976, 24, 25, 29.97, 30, 48, 50, 59.94, 60, 100, 120, 240];
+
+export function ближайшаяЧастота(fps: number | null | undefined): number | null {
+  if (!fps || !Number.isFinite(fps) || fps <= 0) return null;
   // Самое близкое, а не первое подходящее: 24 и 23.976 разнятся на 0.1%.
-  let best = known[0];
-  for (const k of known) if (Math.abs(fps - k) < Math.abs(fps - best)) best = k;
-  return Math.abs(fps - best) / best < 0.002 ? best : Number(fps.toFixed(3));
+  let best = ЧАСТОТЫ[0];
+  for (const k of ЧАСТОТЫ) if (Math.abs(fps - k) < Math.abs(fps - best)) best = k;
+  return best;
+}
+
+function snap(fps: number | null): number | null {
+  return ближайшаяЧастота(fps);
 }
 
 function ascii(bytes: Uint8Array, at: number, len: number): string {
