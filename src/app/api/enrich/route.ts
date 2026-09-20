@@ -195,8 +195,10 @@ export async function POST(request: Request) {
 
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
-      console.error("[enrich] Pollinations ответил", response.status, detail.slice(0, 300));
-      return Response.json(explainError(response.status, detail), { status: 502 });
+      // Сколько ждать, сервис иногда говорит сам — передаём человеку.
+      const ждать = response.headers.get("retry-after") ?? "";
+      console.error("[enrich] Pollinations ответил", response.status, ждать ? `retry-after ${ждать}` : "", detail.slice(0, 300));
+      return Response.json(explainError(response.status, detail, ждать), { status: 502 });
     }
 
     const data = (await response.json()) as {
@@ -249,8 +251,14 @@ export async function POST(request: Request) {
 
 // Коды Pollinations переводятся в понятный человеку текст. Сам ответ сервиса
 // наружу не отдаём: в нём может быть служебное, а подсказку он даёт и так.
-function explainError(status: number, raw: string): { error: string; code: string } {
+function explainError(status: number, raw: string, retryAfter = ""): { error: string; code: string } {
   const message = upstreamMessage(raw);
+  /*  ЛИМИТ ЗАПРОСОВ. Pollinations отвечает на это 429, но иногда тем же
+      отказом с другим кодом и словом limit/quota в теле — человеку в
+      любом случае надо сказать одно и то же, а не «ошибка 403».     */
+  if (status === 429 || (status !== 401 && /rate.?limit|too many requests|quota|limit exceeded/i.test(raw))) {
+    return { error: сообщениеОЛимите(retryAfter), code: "rate_limit" };
+  }
   if (status === 401 || status === 403) {
     return {
       error:
@@ -272,12 +280,6 @@ function explainError(status: number, raw: string): { error: string; code: strin
       code: "rejected",
     };
   }
-  if (status === 429) {
-    return {
-      error: "Слишком часто. Подождите полминуты и повторите — на ключе стоит ограничение запросов.",
-      code: "rate_limit",
-    };
-  }
   if (status === 404) {
     return {
       error:
@@ -292,6 +294,23 @@ function explainError(status: number, raw: string): { error: string; code: strin
     error: `Сервис описания ответил ошибкой ${status}${message ? `: ${message}` : ""}`,
     code: "http_" + status,
   };
+}
+
+/*  Текст про лимит — один на все пути. Главное сказать простыми словами:
+    бесплатные запросы кончились, разбор в браузере продолжает работать. */
+function сообщениеОЛимите(retryAfter: string): string {
+  const секунды = Number(retryAfter);
+  const когда = Number.isFinite(секунды) && секунды > 0 ? через(секунды) : "попробуйте позже";
+  return (
+    `Лимит бесплатных запросов к модели исчерпан — ${когда}. ` +
+    "Локальный разбор работает как обычно: кадры, метрики и промпт по замерам собираются в браузере."
+  );
+}
+
+function через(секунды: number): string {
+  if (секунды < 90) return `повторите примерно через ${Math.max(10, Math.round(секунды))} с`;
+  const минут = Math.round(секунды / 60);
+  return `повторите примерно через ${минут} мин`;
 }
 
 function upstreamMessage(raw: string): string {
