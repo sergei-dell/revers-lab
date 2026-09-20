@@ -12,7 +12,15 @@ import { Segmented } from "@/components/ui";
 import { ENRICH_FRAME_OPTIONS, type EnrichFrameCount, type FrameLimitInfo } from "@/lib/enrichOptions";
 import { copyText, mergeTags } from "@/lib/format";
 import { STATIC_BUILD } from "@/lib/staticMode";
-import { STYLE_PRESETS, type StylePreset } from "@/lib/prompt";
+import {
+  ДЛИТЕЛЬНОСТИ_ВРУЧНУЮ,
+  СТИЛИ_ФОРМАТОВ,
+  STYLE_PRESETS,
+  type StylePreset,
+  type ВыборДлительности,
+  type ВыборФормата,
+  type ПоказФлагов,
+} from "@/lib/prompt";
 import type { PromptBundle } from "@/lib/types";
 
 type View = "prompt" | "json" | "negative";
@@ -48,6 +56,12 @@ export type EnrichAnswer = {
   light: string;
   color: string;
   texture: string;
+  /*  Те же четыре поля по-английски — из них собирается английский
+      шаблон, чтобы в него не утекал русский текст модели.         */
+  cameraEn: string;
+  lightEn: string;
+  colorEn: string;
+  textureEn: string;
   replacements: Array<{ from: string; to: string }>;
   negative: string;
   action: Array<{ t: string; beat: string }>;
@@ -100,6 +114,12 @@ export function PromptPanel({
   onApplyEnrich,
   applyMode,
   hasAnswer,
+  выборФормата,
+  onФорматChange,
+  выборДлительности,
+  onДлительностьChange,
+  показыватьФлаги,
+  onПоказФлаговChange,
   frameCount,
   onFrameCountChange,
   frameLimit,
@@ -138,6 +158,15 @@ export function PromptPanel({
   applyMode: ApplyMode;
   /** есть ли ответ модели: без него доступны одни замеры */
   hasAnswer: boolean;
+  /** формат кадра для флага --ar: «как в ролике» или заданный руками */
+  выборФормата: ВыборФормата;
+  onФорматChange: (value: ВыборФормата) => void;
+  /** длительность для флага --duration: «как в ролике» или секунды */
+  выборДлительности: ВыборДлительности;
+  onДлительностьChange: (value: ВыборДлительности) => void;
+  /** дописывать ли строку с флагами в промпт */
+  показыватьФлаги: ПоказФлагов;
+  onПоказФлаговChange: (value: ПоказФлагов) => void;
   frameCount: EnrichFrameCount;
   onFrameCountChange: (count: EnrichFrameCount) => void;
   frameLimit: FrameLimitInfo | null;
@@ -315,6 +344,70 @@ export function PromptPanel({
           <span>·</span>
           <span>{body.length} симв.</span>
         </div>
+      </div>
+
+      {/*  ФОРМАТ, ДЛИНА И ФЛАГИ. «Как в ролике» — как измерено; выбор
+           человека подставляется во все четыре режима и во все отрезки.
+           Показ флагов выключается: в части генераторов формат задаётся
+           кнопками, и строка в тексте мешает.                         */}
+      <div className="panel-flat space-y-2 p-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <div className="flex items-center gap-1.5">
+            <span className="hud-label">Формат</span>
+            <div className="flex flex-wrap gap-1" role="group" aria-label="Формат кадра для флага --ar">
+              {СТИЛИ_ФОРМАТОВ.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => onФорматChange(f.id)}
+                  disabled={показыватьФлаги === "нет"}
+                  title={f.id === "auto" ? "Формат, измеренный по картинке ролика" : `Ставить --ar ${f.id}`}
+                  className={`rounded-md border px-2 py-1 font-mono text-[11.5px] transition ${
+                    f.id === выборФормата
+                      ? "border-ember/60 bg-ember/14 text-ember"
+                      : показыватьФлаги === "нет"
+                        ? "cursor-not-allowed border-line bg-void/40 text-dim opacity-55"
+                        : "border-line bg-void/50 text-muted hover:border-edge hover:text-chalk"
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <label className="flex items-center gap-1.5">
+            <span className="hud-label">Длительность</span>
+            <select
+              className="field w-auto py-1 font-mono text-[11.5px]"
+              value={выборДлительности}
+              disabled={показыватьФлаги === "нет"}
+              onChange={(e) => onДлительностьChange(e.target.value as ВыборДлительности)}
+            >
+              {ДЛИТЕЛЬНОСТИ_ВРУЧНУЮ.map((d) => (
+                <option key={d} value={d}>
+                  {d === "auto" ? "как в ролике" : `${d} с`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={() => onПоказФлаговChange(показыватьФлаги === "да" ? "нет" : "да")}
+            title="Дописывать ли строку --ar/--duration в промпт"
+            className={`rounded-md border px-2.5 py-1 font-display text-[11.5px] font-semibold transition ${
+              показыватьФлаги === "да"
+                ? "border-ember/60 bg-ember/14 text-ember"
+                : "border-line bg-void/50 text-muted hover:border-edge hover:text-chalk"
+            }`}
+          >
+            {показыватьФлаги === "да" ? "Флаги в промпте: да" : "Флаги в промпте: нет"}
+          </button>
+        </div>
+        <p className="text-[11.5px] leading-snug text-dim">
+          {показыватьФлаги === "нет"
+            ? "Строка --ar/--duration не добавляется никуда: ни в окно, ни в отрезки, ни в копирование."
+            : "Флаги идут во все четыре режима и в промпт каждого отрезка. Выбор запомнится."}
+        </p>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">

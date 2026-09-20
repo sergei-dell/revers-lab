@@ -52,6 +52,14 @@ import {
 import { readHistory, writeHistory } from "@/lib/localHistory";
 import { createChoiceStore, useChoice } from "@/lib/prefs";
 import { segmentLabel, splitIntoSegments, type Segment } from "@/lib/segments";
+import {
+  ДЛИТЕЛЬНОСТИ_ВРУЧНУЮ,
+  ПОКАЗ_ФЛАГОВ,
+  ФОРМАТЫ_ВРУЧНУЮ,
+  type ВыборДлительности,
+  type ВыборФормата,
+  type ПоказФлагов,
+} from "@/lib/prompt";
 import { строкиБезНадписей } from "@/lib/lettering";
 import { buildTemplatePrompt, splitTemplate, слотыРолика } from "@/lib/templatePrompt";
 import { STATIC_BUILD } from "@/lib/staticMode";
@@ -88,8 +96,9 @@ type Phase = "idle" | "decoding" | "probing" | "analyzing" | "ready";
     INVARIANT обязаны быть у отрезков одинаковыми, иначе куски снимаются
     в разном стиле и не склеиваются в один ролик.                     */
 function сквозное(ответы: EnrichAnswer[]) {
-  const первое = (поле: "camera" | "light" | "color" | "texture") =>
-    ответы.map((о) => о[поле].trim()).find(Boolean) ?? "";
+  const первое = (
+    поле: "camera" | "light" | "color" | "texture" | "cameraEn" | "lightEn" | "colorEn" | "textureEn",
+  ) => ответы.map((о) => (о[поле] ?? "").trim()).find(Boolean) ?? "";
   const негатив = uniqueTags(ответы.map((о) => о.negative)).join(", ");
   const всёВместе = ответы.map((о) => `${о.subject} ${о.environment} ${о.ru} ${о.en}`).join(" ");
   return {
@@ -98,6 +107,10 @@ function сквозное(ответы: EnrichAnswer[]) {
       light: первое("light"),
       color: первое("color"),
       texture: первое("texture"),
+      cameraEn: первое("cameraEn") || первое("camera"),
+      lightEn: первое("lightEn") || первое("light"),
+      colorEn: первое("colorEn") || первое("color"),
+      textureEn: первое("textureEn") || первое("texture"),
       negative: негатив,
     },
     slots: слотыРолика(всёВместе),
@@ -170,6 +183,24 @@ const applyModeStore = createChoiceStore<ApplyMode>(
   APPLY_MODE_KEY,
   ["model", "both", "metrics", "template"],
   "model",
+);
+
+/*  Формат кадра, длительность и показ флагов человек задаёт руками —
+    выбор помнится между заходами, как и режим промпта.              */
+const aspectStore = createChoiceStore<ВыборФормата>(
+  "revers-lab.flag-aspect.v1",
+  ФОРМАТЫ_ВРУЧНУЮ,
+  "auto",
+);
+const durationStore = createChoiceStore<ВыборДлительности>(
+  "revers-lab.flag-duration.v1",
+  ДЛИТЕЛЬНОСТИ_ВРУЧНУЮ,
+  "auto",
+);
+const flagsShownStore = createChoiceStore<ПоказФлагов>(
+  "revers-lab.flag-show.v1",
+  ПОКАЗ_ФЛАГОВ,
+  "да",
 );
 
 // Сколько кадров уходит модели — тоже помнится между заходами.
@@ -254,6 +285,9 @@ export function Workspace() {
       показе совпадает; браузер сразу подставляет запомненный.         */
   const выбранныйРежим = useChoice(applyModeStore);
   const frameCount = useChoice(frameCountStore);
+  const выборФормата = useChoice(aspectStore);
+  const выборДлительности = useChoice(durationStore);
+  const показыватьФлаги = useChoice(flagsShownStore);
   const [frameLimitInfo, setFrameLimitInfo] = useState<FrameLimitInfo | null>(null);
   /*  Куда прокрутить окно промпта после подстановки: доля от начала текста
       и ключ, чтобы прокрутка срабатывала и на повторное нажатие.        */
@@ -311,14 +345,32 @@ export function Workspace() {
   // ---------------- derived prompt ----------------
   const bundle: PromptBundle | null = useMemo(() => {
     if (!analysis || !meta) return null;
-    return buildPrompt({ analysis, meta, tags, preset });
-  }, [analysis, meta, tags, preset]);
+    return buildPrompt({
+      analysis,
+      meta,
+      tags,
+      preset,
+      flags: { aspect: выборФормата, duration: выборДлительности, show: показыватьФлаги },
+    });
+  }, [analysis, meta, tags, preset, выборФормата, выборДлительности, показыватьФлаги]);
 
   /*  Стиль и флаги ролика — их просят сразу несколько сборок. */
   const стильРолика = useMemo(
     () => STYLE_PRESETS.find((p) => p.id === preset) ?? { ru: "", en: "" },
     [preset],
   );
+  /*  Длительность отрезка: своя, если формат «как в ролике». Задал
+      человек число секунд — оно стоит и у отрезков, иначе выбор в
+      половине промптов подменялся бы длиной куска.                  */
+  const флагиОтрезка = useCallback(
+    (флаги: string, от: number, до: number) => {
+      if (!флаги || выборДлительности !== "auto") return флаги;
+      const длина = Math.max(1, Math.round(до - от));
+      return флаги.replace(/--duration \d+/, `--duration ${длина}`);
+    },
+    [выборДлительности],
+  );
+
   const флагиРолика = useMemo(
     () => (bundle ? ((bundle.ru.match(/--ar \S+ --duration \d+/) ?? [])[0] ?? "") : ""),
     [bundle],
@@ -906,6 +958,10 @@ export function Workspace() {
           subject: ответ.subject ?? "",
           environment: ответ.environment ?? "",
           camera: ответ.camera ?? "",
+          cameraEn: ответ.cameraEn ?? ответ.camera ?? "",
+          lightEn: ответ.lightEn ?? ответ.light ?? "",
+          colorEn: ответ.colorEn ?? ответ.color ?? "",
+          textureEn: ответ.textureEn ?? ответ.texture ?? "",
           light: ответ.light ?? "",
           color: ответ.color ?? "",
           texture: ответ.texture ?? "",
@@ -925,14 +981,13 @@ export function Workspace() {
             после каждого нового отрезка промпты пересобираются целиком. */
         const общее = сквозное(собранные.map((о) => о.answer));
         for (const о of собранные) {
-          const длина = Math.max(1, Math.round(о.end - о.start));
           о.prompt = собратьТекст(applyMode, {
             local: { ru: bundle.ru, en: bundle.en },
             answer: о.answer,
             analysis,
             meta: { ...meta, durationSec: о.end - о.start },
             style: стиль,
-            flags: флаги.replace(/--duration \d+/, `--duration ${длина}`),
+            flags: флагиОтрезка(флаги, о.start, о.end),
             shared: общее,
             range: { start: о.start, end: о.end },
           });
@@ -951,7 +1006,7 @@ export function Workspace() {
     } finally {
       setSegmentProgress(null);
     }
-  }, [analysis, applyMode, bundle, meta, preset, pushToast, снятьКадры, спроситьМодель]);
+  }, [analysis, applyMode, bundle, meta, preset, pushToast, снятьКадры, спроситьМодель, флагиОтрезка]);
 
   /*  ВСЕ ОТРЕЗКИ ОДНИМ ТЕКСТОМ: сквозные блоки идут сверху один раз,
       дальше отрезки по порядку со своим временем. В шаблоне блоки видны
@@ -963,7 +1018,6 @@ export function Workspace() {
     if (!segments.length || !bundle) return segments;
     const общее = сквозное(segments.map((о) => о.answer));
     return segments.map((о) => {
-      const длина = Math.max(1, Math.round(о.end - о.start));
       return {
         ...о,
         prompt: собратьТекст(applyMode, {
@@ -972,14 +1026,13 @@ export function Workspace() {
           analysis,
           meta: meta ? { ...meta, durationSec: о.end - о.start } : meta,
           style: стильРолика,
-          // Длительность в флагах — своя у каждого отрезка, не всего ролика.
-          flags: флагиРолика.replace(/--duration \d+/, `--duration ${длина}`),
+          flags: флагиОтрезка(флагиРолика, о.start, о.end),
           shared: общее,
           range: { start: о.start, end: о.end },
         }),
       };
     });
-  }, [analysis, applyMode, bundle, meta, segments, стильРолика, флагиРолика]);
+  }, [analysis, applyMode, bundle, meta, segments, стильРолика, флагиОтрезка, флагиРолика]);
 
   const склеенныеОтрезки = useMemo(() => {
     if (!отрезки.length) return { ru: "", en: "" };
@@ -1057,6 +1110,10 @@ export function Workspace() {
         subject: data.subject ?? "",
         environment: data.environment ?? "",
         camera: data.camera ?? "",
+        cameraEn: data.cameraEn ?? data.camera ?? "",
+        lightEn: data.lightEn ?? data.light ?? "",
+        colorEn: data.colorEn ?? data.color ?? "",
+        textureEn: data.textureEn ?? data.texture ?? "",
         light: data.light ?? "",
         color: data.color ?? "",
         texture: data.texture ?? "",
@@ -1580,6 +1637,12 @@ export function Workspace() {
                   onApplyEnrich={applyEnrich}
                   applyMode={applyMode}
                   hasAnswer={ответЕсть}
+                  выборФормата={выборФормата}
+                  onФорматChange={(v) => aspectStore.save(v)}
+                  выборДлительности={выборДлительности}
+                  onДлительностьChange={(v) => durationStore.save(v)}
+                  показыватьФлаги={показыватьФлаги}
+                  onПоказФлаговChange={(v) => flagsShownStore.save(v)}
                   frameCount={frameCount}
                   onFrameCountChange={(n) => frameCountStore.save(n)}
                   frameLimit={frameLimitInfo}

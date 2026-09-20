@@ -205,6 +205,50 @@ function полеКартинки(a: Analysis): { ru: string; en: string } {
 const подписьКамеры = (камера: Analysis["camera"]) =>
   CAMERA_LABELS[камера] ?? { ru: "камера не определена", en: "camera undetermined" };
 
+/*  РУЧНОЙ ВЫБОР ФОРМАТА И ДЛИНЫ. «Как в ролике» — берём измеренное;
+    иначе человек задал формат и секунды сам. Показ флагов тоже его
+    выбор: в части генераторов формат задаётся кнопками, и строка
+    --ar/--duration в тексте только мешает.                          */
+export const ВЫБОР_КАК_В_РОЛИКЕ = "auto";
+export const ФОРМАТЫ_ВРУЧНУЮ = ["auto", "9:16", "16:9", "1:1", "4:3", "3:4"] as const;
+export type ВыборФормата = (typeof ФОРМАТЫ_ВРУЧНУЮ)[number];
+export const ДЛИТЕЛЬНОСТИ_ВРУЧНУЮ = ["auto", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"] as const;
+export type ВыборДлительности = (typeof ДЛИТЕЛЬНОСТИ_ВРУЧНУЮ)[number];
+// Подписи для кнопок формата: «auto» человеку показывается словами.
+export const СТИЛИ_ФОРМАТОВ: Array<{ id: ВыборФормата; label: string }> = [
+  { id: "auto", label: "как в ролике" },
+  { id: "9:16", label: "9:16" },
+  { id: "16:9", label: "16:9" },
+  { id: "1:1", label: "1:1" },
+  { id: "4:3", label: "4:3" },
+  { id: "3:4", label: "3:4" },
+];
+
+export const ПОКАЗ_ФЛАГОВ = ["да", "нет"] as const;
+export type ПоказФлагов = (typeof ПОКАЗ_ФЛАГОВ)[number];
+
+export type ВыборФлагов = {
+  aspect: ВыборФормата;
+  duration: ВыборДлительности;
+  show: ПоказФлагов;
+};
+
+export const ФЛАГИ_ПО_УМОЛЧАНИЮ: ВыборФлагов = { aspect: "auto", duration: "auto", show: "да" };
+
+/** Строка флагов для промпта. Пустая, если человек выключил их показ. */
+export function строкаФлагов(
+  meta: VideoMeta,
+  preset: StylePreset,
+  выбор: ВыборФлагов = ФЛАГИ_ПО_УМОЛЧАНИЮ,
+): string {
+  if (выбор.show === "нет") return "";
+  const измеренный = /^\d+(\.\d+)?:\d+$/.test(meta.aspect) ? meta.aspect : "16:9";
+  const ar = выбор.aspect === "auto" ? измеренный : выбор.aspect;
+  const секунды =
+    выбор.duration === "auto" ? durationFlag(meta.durationSec, preset) : Number(выбор.duration);
+  return `--ar ${ar} --duration ${секунды}`;
+}
+
 export function durationFlag(durationSec: number, preset: StylePreset): number {
   const seconds = Math.round(durationSec || 5);
   if (preset === "seedance") return Math.max(3, Math.min(12, seconds));
@@ -256,6 +300,7 @@ export function buildPrompt(input: {
   meta: VideoMeta;
   tags?: string;
   preset?: StylePreset;
+  flags?: ВыборФлагов;
 }): PromptBundle {
   const { analysis: a, meta, tags = "", preset = "cinema" } = input;
   const style = STYLE_PRESETS.find((p) => p.id === preset) ?? STYLE_PRESETS[0];
@@ -277,11 +322,10 @@ export function buildPrompt(input: {
     a.scenes.length > 1
       ? { ru: `${a.scenes.length} отдельных плана с жёсткими склейками`, en: `${a.scenes.length} distinct shots with hard cuts` }
       : { ru: "один непрерывный дубль", en: "one continuous take" };
-  const ar = /^\d+(\.\d+)?:\d+$/.test(meta.aspect) ? `--ar ${meta.aspect}` : "--ar 16:9";
   /*  Длительность отдельным флагом нужна всем видеомоделям, поэтому
-      флаги идут в любом промпте. У Seedance 2.5 длина ограничена, у
-      остальных берётся как есть, целыми секундами.                   */
-  const flags = `${ar} --duration ${durationFlag(meta.durationSec, style.id)}`;
+      флаги идут в любом промпте — пока человек их не выключил. У
+      Seedance 2.5 длина ограничена, у остальных берётся как есть.   */
+  const flags = строкаФлагов(meta, style.id, input.flags);
 
   const tech = {
     ru: `${meta.width}×${meta.height}${полеКартинки(a).ru} (${meta.aspect}), ${число(meta.durationSec).toFixed(1)} с, ${meta.fps} к/с`,
@@ -296,7 +340,7 @@ export function buildPrompt(input: {
     `Движение: ${motion.ru}.`,
     `Монтаж: ${shotWord.ru}.`,
     `Настроение: ${mood.ru}.`,
-    `Технические параметры: ${tech.ru}. ${flags}`,
+    `Технические параметры: ${tech.ru}.${flags ? ` ${flags}` : ""}`,
   ];
   const enParts = [
     `${style.en ? `${style.en}. ` : ""}${subject.en}.`,
@@ -306,7 +350,7 @@ export function buildPrompt(input: {
     `Motion: ${motion.en}.`,
     `Editing: ${shotWord.en}.`,
     `Mood: ${mood.en}.`,
-    `Technical: ${tech.en}. ${flags}`,
+    `Technical: ${tech.en}.${flags ? ` ${flags}` : ""}`,
   ];
 
   const tagSet = uniqueTags([

@@ -50,6 +50,10 @@ const SYSTEM = `Ты — ассистент обратной генерации 
   "light": "источники, направление, жёсткость, контраст, тени",
   "color": "цветовая схема, температура, обработка, доминирующие цвета",
   "texture": "фактура, зерно, резкость, материалы, атмосферные частицы",
+  "camera_en": "то же про камеру, но по-английски",
+  "light_en": "то же про свет, но по-английски",
+  "color_en": "то же про цвет, но по-английски",
+  "texture_en": "то же про фактуру, но по-английски",
   "action": [{"t": "0.0-1.5", "beat": "что происходит в этом отрезке"}],
   "sound": "предполагаемый звук: шумы, музыка, речь без слов",
   "style_tags": ["5-10 коротких английских тегов"],
@@ -58,6 +62,7 @@ const SYSTEM = `Ты — ассистент обратной генерации 
   "prompt_ru": "готовый промпт на русском, 3-5 предложений",
   "prompt_en": "the same prompt in English"
 }
+Поля camera, light, color и texture пиши по-русски, а camera_en, light_en, color_en и texture_en — теми же словами по-английски: они идут в английский промпт, и русский текст туда попадать не должен.
 Поле action разбивает ролик на 3-6 отрезков по времени, t — в секундах. Если объект неочевиден, описывай форму, материал и поведение, не выдумывай.`;
 
 function currentModel(): string {
@@ -314,6 +319,12 @@ type EnrichAnswer = {
   light: string;
   color: string;
   texture: string;
+  /*  Те же четыре поля по-английски: английский шаблон собирается из
+      них, иначе в него утекает русский текст модели.                */
+  cameraEn: string;
+  lightEn: string;
+  colorEn: string;
+  textureEn: string;
   action: Beat[];
   sound: string;
   negative: string;
@@ -338,6 +349,11 @@ function parseAnswer(raw: string): EnrichAnswer | null {
         light: text(v.light),
         color: text(v.color),
         texture: text(v.texture),
+        // Не ответила по-английски — берём русское, лишь бы поле не пустовало.
+        cameraEn: text(v.camera_en) || text(v.camera),
+        lightEn: text(v.light_en) || text(v.light),
+        colorEn: text(v.color_en) || text(v.color),
+        textureEn: text(v.texture_en) || text(v.texture),
         action: beats(v.action),
         sound: text(v.sound),
         negative: text(v.negative_prompt),

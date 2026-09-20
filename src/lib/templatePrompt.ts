@@ -29,6 +29,10 @@ export type TemplateSource = {
     light: string;
     color: string;
     texture: string;
+    cameraEn?: string;
+    lightEn?: string;
+    colorEn?: string;
+    textureEn?: string;
     action: Array<{ t: string; beat: string }>;
     negative: string;
   };
@@ -42,7 +46,17 @@ export type TemplateSource = {
       склеиваются в один ролик. Меняются только CORE SCENE и TIMELINE. */
   shared?: {
     /** поля разбора, собранные по всем отрезкам */
-    answer: { camera: string; light: string; color: string; texture: string; negative: string };
+    answer: {
+      camera: string;
+      light: string;
+      color: string;
+      texture: string;
+      cameraEn: string;
+      lightEn: string;
+      colorEn: string;
+      textureEn: string;
+      negative: string;
+    };
     /** какие слоты вообще есть в ролике: одинаковые во всех отрезках */
     slots: { hero: boolean; product: boolean; place: boolean };
   };
@@ -315,8 +329,14 @@ export function buildTemplatePrompt(source: TemplateSource): { ru: string; en: s
     const камера = a ? (CAMERA_LABELS[a.camera] ?? { ru: "камера не определена", en: "camera undetermined" }) : null;
     const палитра = (a?.palette ?? []).slice(0, 5).map((p) => p.hex).join(", ");
     const общий = source.shared?.answer;
-    const поле = (имя: "camera" | "light" | "color" | "texture") =>
-      (общий ? общий[имя] : ответ[имя]).trim();
+    /*  В английский блок идут английские поля модели: раньше сюда
+        попадал её русский текст — «средний план, 35 мм» в EN-промпте. */
+    const поле = (имя: "camera" | "light" | "color" | "texture") => {
+      const англ = `${имя}En` as "cameraEn" | "lightEn" | "colorEn" | "textureEn";
+      const источник = общий ?? ответ;
+      const значение = lang === "en" ? (источник[англ] ?? "").trim() || источник[имя] : источник[имя];
+      return (значение ?? "").trim();
+    };
     const стиль = (lang === "ru" ? source.style.ru : source.style.en).trim();
     const движение = камера ? (lang === "ru" ? камера.ru : камера.en) : "";
     const строкаКамеры = [поле("camera"), движение].filter(Boolean).join(", ");
@@ -371,7 +391,9 @@ export function buildTemplatePrompt(source: TemplateSource): { ru: string; en: s
     const timeline = сцены.map((с, и) => {
       const строки = [`${timecode(с.start)}–${timecode(с.end)}`];
       const такт = beatFor(ответ.action, (с.start + с.end) / 2);
-      строки.push(`  Cam: ${камера ? (lang === "ru" ? камера.ru : камера.en) : ответ.camera || "static"}`);
+      строки.push(
+        `  Cam: ${камера ? (lang === "ru" ? камера.ru : камера.en) : поле("camera") || "static"}`,
+      );
       строки.push(`  Act: ${такт || (lang === "ru" ? "продолжение действия" : "action continues")}`);
       if (с === спокойный) {
         строки.push(
