@@ -34,6 +34,7 @@ export type TemplateSource = {
     colorEn?: string;
     textureEn?: string;
     action: Array<{ t: string; beat: string }>;
+    actionEn?: Array<{ t: string; beat: string }>;
     negative: string;
   };
   analysis: Analysis | null;
@@ -390,7 +391,10 @@ export function buildTemplatePrompt(source: TemplateSource): { ru: string; en: s
     const спокойный = сцены.reduce((лучший, с) => (с.intensity < лучший.intensity ? с : лучший), сцены[0]);
     const timeline = сцены.map((с, и) => {
       const строки = [`${timecode(с.start)}–${timecode(с.end)}`];
-      const такт = beatFor(ответ.action, (с.start + с.end) / 2);
+      /*  В английский шаблон идут английские такты: раньше сюда
+          попадал русский текст модели.                          */
+      const такты = lang === "en" && ответ.actionEn?.length ? ответ.actionEn : ответ.action;
+      const такт = beatFor(такты, (с.start + с.end) / 2);
       строки.push(
         `  Cam: ${камера ? (lang === "ru" ? камера.ru : камера.en) : поле("camera") || "static"}`,
       );

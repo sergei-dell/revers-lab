@@ -65,6 +65,8 @@ export type EnrichAnswer = {
   replacements: Array<{ from: string; to: string }>;
   negative: string;
   action: Array<{ t: string; beat: string }>;
+  /** те же такты по-английски — для английского шаблона */
+  actionEn: Array<{ t: string; beat: string }>;
   /** сколько кадров ушло и сколько что заняло — показывается под ответом */
   timing?: { frames: number; captureMs: number; modelMs: number | null; totalMs: number; requestKb: number | null };
 };

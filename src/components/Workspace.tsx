@@ -955,6 +955,7 @@ export function Workspace() {
           ru: ответ.ru ?? "",
           en: ответ.en ?? "",
           tags: uniqueTags(ответ.tags ?? []),
+          actionEn: ответ.actionEn ?? ответ.action ?? [],
           subject: ответ.subject ?? "",
           environment: ответ.environment ?? "",
           camera: ответ.camera ?? "",
@@ -1107,6 +1108,7 @@ export function Workspace() {
         en: data.en ?? "",
         // Теги модели — без повторов: она любит повторить одно и то же дважды.
         tags: uniqueTags(data.tags ?? []),
+        actionEn: data.actionEn ?? data.action ?? [],
         subject: data.subject ?? "",
         environment: data.environment ?? "",
         camera: data.camera ?? "",
