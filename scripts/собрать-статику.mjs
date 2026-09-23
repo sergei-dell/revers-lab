@@ -19,6 +19,12 @@ const СЕРВЕРНОЕ = [
   "src/lib/pollinationsModels.ts",
   "src/lib/history.ts",
   "drizzle.config.json",
+  /*  Замок на пароле держится сервером: в статической сборке сервера
+      нет, поэтому сюда не едут ни мидлвар, ни страница входа.     */
+  "src/middleware.ts",
+  "src/lib/замок.ts",
+  "src/app/vhod",
+  "src/components/LockForm.tsx",
 ];
 const УБРАТЬ_ЗАВИСИМОСТИ = ["drizzle-orm", "pg", "dotenv"];
 const УБРАТЬ_РАЗРАБОТКУ = ["drizzle-kit", "@types/pg"];
