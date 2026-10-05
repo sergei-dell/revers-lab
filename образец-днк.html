@@ -1,0 +1,266 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>РЕВЕРС «ДНК ролика»</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --void:#07070a; --panel:#101017; --raised:#16161f; --line:#212130; --edge:#2e2e40;
+  --chalk:#f4f1ea; --muted:#9b98a8; --dim:#6a6779;
+  --ember:#ff6a2b; --flare:#ffc247; --ice:#62d9e8; --good:#35d07f; --bad:#ff4d6d;
+  color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--void);color:var(--chalk);font:15px/1.5 Manrope,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--ember);outline-offset:2px;border-radius:6px}
+h1,h2,h3{font-family:'Chakra Petch',Manrope,sans-serif;margin:0;letter-spacing:.01em;text-wrap:balance}
+h2{font-size:20px} h3{font-size:16px}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+.muted{color:var(--muted)} .dim{color:var(--dim)}
+.wrap{max-width:1200px;margin:0 auto;padding-inline:16px;padding-block:14px 70px;display:grid;gap:16px}
+.note{background:var(--chalk);color:#0b0b10;border-radius:14px;padding:11px 16px;font-size:13.5px}
+.top{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.logo{display:flex;align-items:center;gap:10px;font-family:'Chakra Petch',sans-serif;font-weight:700;font-size:18px;letter-spacing:.08em}
+.logo i{width:26px;height:26px;border-radius:6px;background:conic-gradient(from 200deg,var(--ember),var(--flare),#c7431a,var(--ember))}
+.src{margin-left:auto;display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:6px 12px 6px 6px;font-size:13.5px}
+.src .th{width:30px;aspect-ratio:9/16;border-radius:5px;background:linear-gradient(170deg,#f2a15e,#5a3428)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:16px}
+.lbl{font-size:11.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--dim);font-weight:600}
+
+/* конвейер */
+.pipe{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px}
+@media (max-width:820px){.pipe{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.st{border:1px solid var(--line);border-radius:12px;padding:9px 11px;background:var(--raised);display:grid;gap:2px;font-size:12.5px}
+.st b{font-family:'Chakra Petch',sans-serif;font-size:14px}
+.st .who{font-size:11px;letter-spacing:.06em;text-transform:uppercase}
+.st.done{border-color:rgba(53,208,127,.4)} .st.done b{color:var(--good)}
+.st.now{border-color:var(--ember);box-shadow:0 0 18px -6px var(--ember)}
+.who.auto{color:var(--ice)} .who.hand{color:var(--flare)}
+
+/* нить */
+.strand{display:flex;align-items:stretch;gap:0;margin-top:10px;min-height:70px}
+.gene{border:1px solid var(--edge);border-radius:12px;background:var(--raised);padding:8px 10px;text-align:left;display:flex;flex-direction:column;justify-content:space-between;min-width:0;position:relative;overflow:hidden}
+.gene b{font-family:'Chakra Petch',sans-serif;font-size:14px}
+.gene small{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gene[aria-pressed="true"]{border-color:var(--ember);box-shadow:0 0 0 1px var(--ember),0 0 24px -6px var(--ember)}
+.gene .acc{position:absolute;left:0;right:0;bottom:0;height:3px}
+.tr{flex:none;width:26px;display:grid;place-items:center;position:relative}
+.tr span{writing-mode:vertical-rl;transform:rotate(180deg);font-size:10.5px;color:var(--flare);letter-spacing:.04em;white-space:nowrap}
+.ticks{display:flex;justify-content:space-between;font-size:11px;color:var(--dim);margin-top:4px}
+
+.grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:16px}
+@media (max-width:900px){.grid{grid-template-columns:1fr}}
+.slots{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.slot{font:12.5px 'JetBrains Mono',monospace;padding:3px 9px;border-radius:7px;background:rgba(255,106,43,.14);color:var(--ember);border:1px solid rgba(255,106,43,.35)}
+.slot.off{background:transparent;color:var(--dim);border-color:var(--line);text-decoration:line-through}
+.kf{display:grid;grid-template-columns:1fr auto 1fr auto 1fr;gap:8px;align-items:center;margin-top:12px}
+.kf .arr{color:var(--dim);font-size:18px}
+.kcol{display:grid;gap:6px;min-width:0}
+.kcol .lbl{text-align:center}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.shot{aspect-ratio:9/14;width:100%;border-radius:10px;position:relative;overflow:hidden;border:1px solid var(--edge);background:var(--raised)}
+.shot .h{position:absolute;border-radius:40% 40% 18% 18%}
+.shot .h::before{content:"";position:absolute;left:50%;top:-34%;width:58%;aspect-ratio:1;border-radius:50%;transform:translateX(-50%);background:inherit}
+.shot .p{position:absolute;border-radius:5px;box-shadow:0 3px 8px rgba(0,0,0,.4)}
+.shot .ground{position:absolute;left:0;right:0;bottom:0;height:28%}
+.shot .tag{position:absolute;left:5px;top:5px;font-size:10px;background:rgba(0,0,0,.55);padding:1px 6px;border-radius:999px}
+.shot.empty{display:grid;place-items:center;color:var(--dim);font-size:11.5px;text-align:center;padding:6px;border-style:dashed}
+.vid{aspect-ratio:9/14;width:100%}
+.genes{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:6px;margin-top:14px}
+.g{display:grid;grid-template-columns:22px minmax(0,1fr);gap:8px;padding:7px 9px;border-radius:10px;background:var(--raised);border:1px solid var(--line);font-size:13px}
+.g .k{color:var(--muted);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em}
+.g.locked .ic{color:var(--ice)} .g.open .ic{color:var(--ember)} .g.open{border-color:rgba(255,106,43,.3)}
+.g.changed .v{color:var(--flare)}
+
+.swap{display:grid;gap:12px;align-content:start}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--edge);background:var(--raised);border-radius:999px;padding:6px 12px;font-size:13.5px;display:flex;align-items:center;gap:7px}
+.chip i{width:14px;height:14px;border-radius:4px;display:block}
+.chip[aria-pressed="true"]{border-color:var(--ember);background:rgba(255,106,43,.15);color:#fff}
+.fixed{font-size:13px;color:var(--muted);padding:10px 12px;border-radius:10px;border:1px dashed var(--edge)}
+.fixed b{color:var(--ice)}
+
+.btn{border:0;border-radius:12px;padding:11px 16px;font-weight:700;background:var(--ember);color:#160a04}
+.btn.ghost{background:transparent;border:1px solid var(--edge);color:var(--chalk);font-weight:600}
+.btn.ok{background:var(--good);color:#04140b}
+.btn.small{padding:7px 12px;font-size:13px;border-radius:10px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.cost{font-size:12.5px;color:var(--muted)}
+
+/* монтаж */
+.mont{display:grid;grid-template-columns:minmax(0,1fr) 190px;gap:18px;align-items:start}
+@media (max-width:700px){.mont{grid-template-columns:1fr}}
+.track{display:flex;align-items:stretch;margin-top:10px;height:66px}
+.clip{border-radius:8px;position:relative;overflow:hidden;border:1px solid var(--edge);display:flex;align-items:flex-end;padding:4px 6px;font-size:11px;font-weight:600}
+.clip.on{outline:2px solid #fff}
+.tj{flex:none;width:22px;display:grid;place-items:center;font-size:15px;color:var(--flare)}
+.phone{aspect-ratio:9/16;width:100%;max-width:190px;border-radius:22px;border:6px solid #1c1c26;position:relative;overflow:hidden;background:#000}
+.phone .shot{position:absolute;inset:0;border:0;border-radius:0;aspect-ratio:auto;height:100%}
+.flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
+.res{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:12px}
+.rc{background:var(--raised);border:1px solid var(--line);border-radius:12px;padding:9px 11px;display:grid;gap:3px;font-size:12.5px}
+.rc big{font-family:'Chakra Petch',sans-serif;font-size:20px;font-variant-numeric:tabular-nums}
+.rc.ok big{color:var(--good)} .rc.bad big{color:var(--bad)}
+.owner{display:flex;gap:12px;flex-wrap:wrap;align-items:center;padding:12px 14px;border-radius:14px;background:rgba(255,194,71,.08);border:1px solid rgba(255,194,71,.3);margin-top:12px;font-size:13.5px}
+.owner .grow{flex:1;min-width:200px}
+pre{margin:10px 0 0;background:#0a0a0f;border:1px solid var(--line);border-radius:12px;padding:12px;font:12px/1.5 'JetBrains Mono',monospace;color:#d8d5e6;overflow-x:auto;max-height:260px;white-space:pre}
+details summary{cursor:pointer;color:var(--muted);font-size:13px;margin-top:10px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="wrap">
+  <div class="note"><b>Макет.</b> Ролик-образец разрезан на 5 сцен с переходами между ними. Идите по конвейеру кнопками снизу: <b>Ваши кадры</b> (замена в первом и последнем кадре каждой сцены) → <b>Видео</b> (оживление между ними) → <b>Монтаж</b> (склейка с теми же переходами) → <b>Проверка</b>. Голубое — делает сайт сам, жёлтое — нужен ваш взгляд.</div>
+
+  <div class="top">
+    <div class="logo"><i></i>РЕВЕРС <span class="dim" style="font-family:Manrope;font-weight:500;font-size:13px;letter-spacing:0">ДНК ролика</span></div>
+    <div class="src"><div class="th"></div><div><b>Кеды в городе</b><div class="dim mono" style="font-size:12px">образец · 8,0 сек · 5 сцен · 4 перехода</div></div></div>
+  </div>
+
+  <div class="pipe" id="pipe"></div>
+
+  <div class="card">
+    <div class="lbl">Нить ДНК — сцены и переходы</div>
+    <div class="strand" id="strand"></div>
+    <div class="ticks mono"><span>0:00</span><span>0:02</span><span>0:04</span><span>0:06</span><span>0:08</span></div>
+  </div>
+
+  <div class="grid">
+    <div class="card" id="scene"></div>
+    <div class="card swap" id="swap"></div>
+  </div>
+
+  <div class="card" id="mont"></div>
+</div>
+
+<script>
+const LIGHT={orig:{n:'Как в образце',bg:'linear-gradient(170deg,#f6b37a,#8a4a35)',gr:'#5b3a2e',tx:'тёплый закат, солнце слева'},
+ night:{n:'Ночь, неон',bg:'linear-gradient(170deg,#3a1a6e,#0c0a22)',gr:'#1d1435',tx:'ночь, розово-голубой неон, блики на асфальте'},
+ day:{n:'Яркий день',bg:'linear-gradient(170deg,#bfe2f5,#6f9fbd)',gr:'#8d8f95',tx:'полдень, солнце сверху'},
+ cold:{n:'Холодное утро',bg:'linear-gradient(170deg,#d8e1e8,#7f8f9c)',gr:'#6c7378',tx:'пасмурное утро, рассеянный свет'}};
+const HERO={orig:{n:'Как в образце',c:'#3b5b8c',tx:'парень 20–25, джинсовая куртка'},girl:{n:'Девушка 25',c:'#b0566d',tx:'девушка 25, бежевый тренч'},mine:{n:'Ваше фото',c:'#e8763f',tx:'герой с фото клиента'}};
+const PLACE={orig:{n:'Как в образце',g:null,tx:'узкая улица, брусчатка'},park:{n:'Парк',g:'#3f6b3a',tx:'аллея в парке'},mine:{n:'Ваше фото',g:'#7a5a8a',tx:'место с фото клиента'}};
+const PROD={orig:{n:'Как в образце',c:'#f4f1ea',tx:'белые кеды'},mine:{n:'Ваш товар',c:'#ff4d6d',tx:'товар с фото клиента'}};
+const ORIG={bg:LIGHT.orig.bg,gr:LIGHT.orig.gr,h:'#59606e',p:'#e9e4da'};
+
+const SC=[
+ {t:'Крючок',a:0,b:1.5,acc:'#ff6a2b',slots:['товар'],plan:'крупный, уровень земли',cam:'статичная',act:'кед шагает на камеру и замирает',f1:{h:null,p:[40,62,20,10]},f2:{h:null,p:[25,48,50,24]}},
+ {t:'Проход',a:1.5,b:3.5,acc:'#ffc247',slots:['герой','товар','место'],plan:'средний, в полный рост',cam:'тревеллинг назад, 1 м/с',act:'герой идёт к камере, улыбается',f1:{h:[42,30,16,40],p:[45,70,10,5]},f2:{h:[36,22,28,56],p:[40,78,18,7]}},
+ {t:'Деталь',a:3.5,b:5,acc:'#62d9e8',slots:['товар'],plan:'макро, 45° сбоку',cam:'облёт на 90°',act:'рука завязывает шнурок',f1:{h:null,p:[20,52,60,26]},f2:{h:null,p:[15,46,70,30]}},
+ {t:'Прыжок',a:5,b:6.3,acc:'#b98cff',slots:['герой','товар','место'],plan:'средний, снизу',cam:'рывок вверх за героем',act:'герой прыгает через лужу',f1:{h:[40,40,20,42],p:[45,78,12,5]},f2:{h:[42,12,20,42],p:[47,50,12,5]}},
+ {t:'Финал',a:6.3,b:8,acc:'#35d07f',slots:['герой','место'],plan:'общий, спиной',cam:'кран вверх, отъезд',act:'герой уходит вдаль',f1:{h:[44,40,12,30],p:[47,70,6,3]},f2:{h:[47,46,6,16],p:[48,62,4,2]}}];
+const TR=['склейка в бит','взмах камеры','вспышка','склейка'];
+
+const S={i:1,light:'orig',hero:'mine',place:'orig',prod:'mine',stage:2,score:null,regen:{},approved:false,busy:false};
+// stage: 2 = ДНК готова, 3 = ваши кадры, 4 = видео, 5 = монтаж, 6 = проверка
+const $=s=>document.querySelector(s);
+
+function look(own){
+  if(!own) return {bg:ORIG.bg,gr:ORIG.gr,h:ORIG.h,p:ORIG.p};
+  const L=LIGHT[S.light];
+  return {bg:L.bg,gr:PLACE[S.place].g||L.gr,h:HERO[S.hero].c,p:PROD[S.prod].c};
+}
+function shotHTML(f,own,tag,cls=''){
+  const k=look(own);
+  const h=f.h?`<div class="h" style="left:${f.h[0]}%;top:${f.h[1]}%;width:${f.h[2]}%;height:${f.h[3]}%;background:${k.h}"></div>`:'';
+  return `<div class="shot ${cls}" style="background:${k.bg}"><div class="ground" style="background:${k.gr}"></div>${h}<div class="p" style="left:${f.p[0]}%;top:${f.p[1]}%;width:${f.p[2]}%;height:${f.p[3]}%;background:${k.p}"></div>${tag?`<span class="tag">${tag}</span>`:''}</div>`;
+}
+function animateShot(el,s,dur=1600){
+  if(!el)return;const h=el.querySelector('.h'),p=el.querySelector('.p');
+  const box=a=>({left:a[0]+'%',top:a[1]+'%',width:a[2]+'%',height:a[3]+'%'});
+  const o={duration:dur,iterations:Infinity,direction:'alternate',easing:'ease-in-out'};
+  if(h&&s.f1.h&&s.f2.h)h.animate([box(s.f1.h),box(s.f2.h)],o);
+  p.animate([box(s.f1.p),box(s.f2.p)],o);
+}
+
+function renderPipe(){
+  const P=[['1','Нарезка','auto','сцены, кадры, время'],['2','ДНК','auto','гены и метки'],['3','Ваши кадры','auto','замена в кадрах'],['4','Видео','auto','оживление сцен'],['5','Монтаж','auto','склейка, переходы'],['6','Проверка','hand','ваш взгляд']];
+  $('#pipe').innerHTML=P.map(([n,t,w,d],i)=>{const k=i+1;const c=k<=S.stage?'done':k===S.stage+1?'now':'';return `<div class="st ${c}"><span class="who ${w}">${w==='auto'?'сам':'вы'}</span><b>${k<=S.stage?'✓ ':''}${n}. ${t}</b><span class="muted">${d}</span></div>`}).join('');
+}
+function renderStrand(){
+  let h='';SC.forEach((s,i)=>{h+=`<button class="gene" style="flex:${s.b-s.a}" aria-pressed="${S.i===i}" data-sc="${i}"><b>${i+1}. ${s.t}</b><small>${s.slots.map(x=>'['+x+']').join(' ')}</small><span class="acc" style="background:${s.acc}"></span></button>`;
+    if(i<TR.length)h+=`<div class="tr" title="${TR[i]}"><span>${TR[i]}</span></div>`;});
+  $('#strand').innerHTML=h;
+}
+function g(lock,k,v,ch){return `<div class="g ${lock?'locked':'open'} ${ch?'changed':''}"><span class="ic">${lock?'🔒':'✎'}</span><div><div class="k">${k}</div><div class="v">${v}</div></div></div>`}
+function renderScene(){
+  const s=SC[S.i];const all=['товар','место','герой'];
+  const own=S.stage>=3, vid=S.stage>=4;
+  $('#scene').innerHTML=`
+   <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline"><h2>Сцена ${S.i+1} · ${s.t}</h2><span class="mono muted" style="font-size:13px">${s.a.toFixed(1)}–${s.b.toFixed(1)} сек</span></div>
+   <div class="slots">${all.map(x=>`<span class="slot ${s.slots.includes(x)?'':'off'}">[${x}]</span>`).join('')}<span class="dim" style="font-size:12px;align-self:center">— метки шаблона: к этой сцене прикладываются фото клиента</span></div>
+   <div class="kf">
+     <div class="kcol"><span class="lbl">Оригинал</span><div class="pair">${shotHTML(s.f1,false,'начало')}${shotHTML(s.f2,false,'конец')}</div></div>
+     <span class="arr">→</span>
+     <div class="kcol"><span class="lbl">Ваши кадры</span>${own?`<div class="pair">${shotHTML(s.f1,true,'начало')}${shotHTML(s.f2,true,'конец')}</div>`:`<div class="pair"><div class="shot empty">шаг 3</div><div class="shot empty">шаг 3</div></div>`}</div>
+     <span class="arr">→</span>
+     <div class="kcol"><span class="lbl">Видео сцены</span>${vid?`<div class="vid" id="vid">${shotHTML(s.f1,true,'▶ '+(s.b-s.a).toFixed(1)+' с')}</div>`:`<div class="shot empty">шаг 4</div>`}</div>
+   </div>
+   <div class="genes">
+     ${g(1,'Действие',s.act)}${g(1,'План',s.plan)}${g(1,'Камера',s.cam)}${g(1,'Ритм',(s.b-s.a).toFixed(1)+' сек')}
+     ${g(0,'Свет',LIGHT[S.light].tx,S.light!=='orig')}
+     ${s.slots.includes('герой')?g(0,'Герой',HERO[S.hero].tx,S.hero!=='orig'):''}
+     ${s.slots.includes('место')?g(0,'Место',PLACE[S.place].tx,S.place!=='orig'):''}
+     ${s.slots.includes('товар')?g(0,'Товар',PROD[S.prod].tx,S.prod!=='orig'):''}
+   </div>`;
+  if(vid)animateShot($('#vid .shot'),s,(s.b-s.a)*900);
+}
+function chips(key,obj){return `<div class="chips">${Object.entries(obj).map(([k,v])=>`<button class="chip" aria-pressed="${S[key]===k}" data-${key}="${k}">${v.c?`<i style="background:${v.c}"></i>`:''}${v.n}</button>`).join('')}</div>`}
+function renderSwap(){
+  $('#swap').innerHTML=`
+   <h2>Что подставляем</h2>
+   <div><div class="lbl">Свет и цвет</div>${chips('light',LIGHT)}</div>
+   <div><div class="lbl">[герой]</div>${chips('hero',HERO)}</div>
+   <div><div class="lbl">[место]</div>${chips('place',PLACE)}</div>
+   <div><div class="lbl">[товар]</div>${chips('prod',PROD)}</div>
+   <div class="fixed"><b>🔒 Не меняется:</b> сюжет, композиция, камера, ритм, переходы. Их держат первый и последний кадр каждой сцены из нарезки и движение из образца.</div>`;
+}
+let play=null;
+function renderMont(){
+  const btn=[
+   [2,'Сделать ваши кадры','Замена в 10 кадрах (по 2 на сцену) · ~$0.10 · ~30 сек'],
+   [3,'Оживить сцены','5 сцен видео по ~1,6 сек · ~$0.55 · 2–4 мин'],
+   [4,'Собрать ролик','Склейка с переходами образца · бесплатно · ~10 сек'],
+   [5,'Проверить совпадение','Сравнение каждой сцены с оригиналом · сам']].find(b=>b[0]===S.stage);
+  const tot=8;
+  let track='';SC.forEach((s,i)=>{track+=`<div class="clip" data-clip="${i}" style="flex:${s.b-s.a};background:${S.stage>=4?look(true).bg:'var(--raised)'};border-color:${s.acc}">${i+1}</div>`;if(i<TR.length)track+=`<div class="tj" title="${TR[i]}">${['✂','↯','✦','✂'][i]}</div>`;});
+  let res='';
+  if(S.stage>=6){res=`<div class="lbl" style="margin-top:14px">Совпадение с образцом по сценам</div><div class="res">${SC.map((s,i)=>{const v=S.regen[i]||S.score[i];const ok=v>=85;return `<div class="rc ${ok?'ok':'bad'}"><span class="muted">${i+1}. ${s.t}</span><big>${v}%</big>${ok?'<span class="muted">совпадает</span>':`<button class="btn small ghost" data-re="${i}">Перегенерировать (сам)</button>`}</div>`}).join('')}</div>
+   <div class="owner"><div class="grow"><b>Ваш взгляд — один раз на тренд.</b> <span class="muted">Посмотрите ролик справа. Если качество можно продавать — тренд уходит на витрину, дальше заказы клиентов идут без вас.</span></div>
+   ${S.approved?'<b style="color:var(--good)">✓ Тренд отправлен на витрину</b>':`<button class="btn ok" data-approve ${Object.values(S.score).some((v,i)=>(S.regen[i]||v)<85)?'disabled title="Сначала перегенерируйте красные сцены"':''}>Проверено — на витрину</button>`}</div>`;}
+  $('#mont').innerHTML=`
+   <div class="mont"><div>
+     <h2>Монтаж</h2>
+     <div class="lbl" style="margin-top:6px">Дорожка: сцены и переходы из образца</div>
+     <div class="track">${track}</div>
+     <div class="ticks mono"><span>0:00</span><span>${tot} сек</span></div>
+     <div class="actions" style="margin-top:14px">${btn?`<button class="btn" data-next ${S.busy?'disabled':''}>${S.busy?'Работаем…':btn[1]}</button><span class="cost">${btn[2]}</span>`:`<span class="cost">Готово. Поменяйте подстановку справа — конвейер пройдёт заново.</span>`}</div>
+     ${res}
+     <details><summary>Файл ДНК (что уходит в генерацию)</summary><pre>${JSON.stringify({dnk:'1.0',source:'Кеды в городе',duration:8,scenes:SC.map((s,i)=>({n:i+1,from:s.a,to:s.b,slots:s.slots,locked:{action:s.act,shot:s.plan,camera:s.cam},first:`s${i+1}_first.jpg`,last:`s${i+1}_last.jpg`,motion:`source.mp4#t=${s.a},${s.b}`,transition_out:TR[i]||null})),replace:{light:LIGHT[S.light].tx,hero:HERO[S.hero].tx,place:PLACE[S.place].tx,product:PROD[S.prod].tx}},null,2).replace(/</g,'&lt;')}</pre></details>
+   </div>
+   <div><div class="lbl" style="margin-bottom:6px">Ролик</div><div class="phone" id="phone">${S.stage>=5?'':'<div class="shot empty" style="position:absolute;inset:0;border:0;aspect-ratio:auto">появится после монтажа</div>'}<div class="flash" id="flash"></div></div></div>
+   </div>`;
+  if(S.stage>=5)startPlay();
+}
+function startPlay(){
+  clearTimeout(play);const ph=$('#phone');if(!ph)return;let i=0;
+  const step=()=>{const s=SC[i];ph.querySelectorAll('.shot').forEach(e=>e.remove());ph.insertAdjacentHTML('afterbegin',shotHTML(s.f1,true,`${i+1}/${SC.length}`));
+    animateShot(ph.querySelector('.shot'),s,(s.b-s.a)*1000);
+    document.querySelectorAll('.clip').forEach(c=>c.classList.toggle('on',+c.dataset.clip===i));
+    const t=TR[i];const fl=$('#flash');
+    play=setTimeout(()=>{if(t==='вспышка'&&fl)fl.animate([{opacity:0},{opacity:.9},{opacity:0}],{duration:260});
+      if(t==='взмах камеры'){const sh=ph.querySelector('.shot');sh&&sh.animate([{transform:'translateX(0)',filter:'blur(0)'},{transform:'translateX(-60%)',filter:'blur(6px)'}],{duration:180});}
+      i=(i+1)%SC.length;play=setTimeout(step,t==='взмах камеры'?170:0);},(s.b-s.a)*1000);};
+  step();
+}
+function render(){renderPipe();renderStrand();renderScene();renderSwap();renderMont();}
+document.addEventListener('click',e=>{
+  const b=e.target.closest('button');if(!b)return;const d=b.dataset;
+  if(d.sc!==undefined){S.i=+d.sc;renderStrand();renderScene();return;}
+  for(const k of ['light','hero','place','prod'])if(d[k]){S[k]=d[k];if(S.stage>2)S.stage=2;S.score=null;S.regen={};S.approved=false;clearTimeout(play);render();return;}
+  if('next' in d){S.busy=true;renderMont();setTimeout(()=>{S.busy=false;S.stage++;if(S.stage===6)S.score=[93,89,82,90,91];render();},900);return;}
+  if(d.re!==undefined){S.regen[+d.re]=90;renderMont();return;}
+  if('approve' in d){S.approved=true;renderMont();return;}
+});
+render();
+</script>

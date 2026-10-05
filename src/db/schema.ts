@@ -7,6 +7,7 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
+import type { ДНКдляИстории } from "@/lib/dnk/types";
 import type { PaletteEntry, SceneCut, StoredMetrics } from "@/lib/types";
 
 export const analyses = pgTable("analyses", {
@@ -29,6 +30,9 @@ export const analyses = pgTable("analyses", {
   metrics: jsonb("metrics").$type<StoredMetrics>(),
   palette: jsonb("palette").$type<PaletteEntry[]>().notNull().default([]),
   scenes: jsonb("scenes").$type<SceneCut[]>().notNull().default([]),
+  /*  ДНК ролика: сцены, переходы и гены. Пусто у разборов,
+      сделанных в режиме «Промпт».                            */
+  dnk: jsonb("dnk").$type<ДНКдляИстории>(),
   frameCount: integer("frame_count").notNull().default(0),
   thumb: text("thumb"),
   createdAt: timestamp("created_at", { withTimezone: true })

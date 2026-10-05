@@ -1,5 +1,5 @@
 import { and, desc, eq } from "drizzle-orm";
-import { db } from "@/db";
+import { готоваяБаза } from "@/db";
 import { analyses, type AnalysisInsert } from "@/db/schema";
 import { rowToHistoryItem } from "@/lib/history";
 
@@ -28,7 +28,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const id = url.searchParams.get("id");
     if (id) {
-      const rows = await db
+      const rows = await (await готоваяБаза())
         .select()
         .from(analyses)
         .where(and(eq(analyses.id, id)))
@@ -39,7 +39,7 @@ export async function GET(request: Request) {
       return Response.json({ item: rowToHistoryItem(rows[0]) });
     }
     const limit = Math.min(60, Math.max(1, int(url.searchParams.get("limit"), 24, 60)));
-    const rows = await db
+    const rows = await (await готоваяБаза())
       .select()
       .from(analyses)
       .orderBy(desc(analyses.createdAt))
@@ -95,10 +95,11 @@ export async function POST(request: Request) {
     scenes: Array.isArray(body.scenes) ? (body.scenes as AnalysisInsert["scenes"]) : [],
     frameCount: int(body.frameCount),
     thumb: str(body.thumb, "", MAX_THUMB) || null,
+    dnk: (body.dnk as AnalysisInsert["dnk"]) ?? undefined,
   };
 
   try {
-    const rows = await db.insert(analyses).values(payload).returning();
+    const rows = await (await готоваяБаза()).insert(analyses).values(payload).returning();
     return Response.json({ item: rowToHistoryItem(rows[0]) }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Неизвестная ошибка";

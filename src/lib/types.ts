@@ -1,3 +1,5 @@
+import type { ДНКдляИстории } from "@/lib/dnk/types";
+
 export type FrameSource = "manual" | "auto" | "scene";
 
 export type FrameShot = {
@@ -144,5 +146,8 @@ export type HistoryItem = {
   scenes: SceneCut[];
   frameCount: number;
   thumb: string | null;
+  /*  ДНК ролика — сцены, переходы и гены. Есть только у разборов,
+      сделанных в режиме «ДНК ролика»; у прежних записей её нет.    */
+  dnk: ДНКдляИстории | null;
   createdAt: string;
 };

@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { db } from "@/db";
+import { готоваяБаза } from "@/db";
 import { analyses } from "@/db/schema";
 import { rowToHistoryItem } from "@/lib/history";
 
@@ -10,7 +10,7 @@ type Ctx = { params: Promise<{ id: string }> };
 export async function GET(_request: Request, ctx: Ctx) {
   const { id } = await ctx.params;
   try {
-    const rows = await db.select().from(analyses).where(eq(analyses.id, id)).limit(1);
+    const rows = await (await готоваяБаза()).select().from(analyses).where(eq(analyses.id, id)).limit(1);
     if (!rows.length) {
       return Response.json({ error: "Запись не найдена" }, { status: 404 });
     }
@@ -24,7 +24,7 @@ export async function GET(_request: Request, ctx: Ctx) {
 export async function DELETE(_request: Request, ctx: Ctx) {
   const { id } = await ctx.params;
   try {
-    const rows = await db.delete(analyses).where(eq(analyses.id, id)).returning({ id: analyses.id });
+    const rows = await (await готоваяБаза()).delete(analyses).where(eq(analyses.id, id)).returning({ id: analyses.id });
     if (!rows.length) {
       return Response.json({ error: "Запись не найдена" }, { status: 404 });
     }

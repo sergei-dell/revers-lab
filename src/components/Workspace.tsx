@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { Dropzone } from "@/components/Dropzone";
+import { DnkStage, днкДляИстории } from "@/components/DnkStage";
 import { FrameBoard, type ExtractMode } from "@/components/FrameBoard";
 import { HistoryPanel } from "@/components/HistoryPanel";
 import { MetricsPanel } from "@/components/MetricsPanel";
@@ -64,6 +65,7 @@ import { строкиБезНадписей } from "@/lib/lettering";
 import { buildTemplatePrompt, splitTemplate, слотыРолика } from "@/lib/templatePrompt";
 import { STATIC_BUILD } from "@/lib/staticMode";
 import { analysisFromRow, toStoredMetrics } from "@/lib/store";
+import type { ДНК } from "@/lib/dnk/types";
 import type {
   Analysis,
   FrameShot,
@@ -264,6 +266,11 @@ export function Workspace() {
   const [extracting, setExtracting] = useState(false);
   const [extractProgress, setExtractProgress] = useState<{ done: number; total: number } | null>(null);
   const [zipping, setZipping] = useState(false);
+
+  /*  ДВА РЕЖИМА РЯДОМ. «Промпт» — всё, что было; «ДНК ролика» —
+      разбор по сценам. Старый режим остаётся по умолчанию.      */
+  const [режим, setРежим] = useState<"prompt" | "dnk">("prompt");
+  const [днк, setДНК] = useState<ДНК | null>(null);
 
   const [tab, setTab] = useState<Tab>("prompt");
   const [lang, setLang] = useState<"ru" | "en">("ru");
@@ -517,6 +524,7 @@ export function Workspace() {
       setEnrichResult(null);
       setEnrichError(null);
       setSegments([]);
+      setДНК(null);
       setClip({ a: null, b: null });
       setFatal(null);
       setTab("prompt");
@@ -1277,6 +1285,7 @@ export function Workspace() {
           scenes: analysis.scenes,
           frameCount: shots.length,
           thumb: thumbRef.current,
+          dnk: днкДляИстории(днк),
           createdAt: new Date().toISOString(),
         };
         const { saved, dropped } = writeHistory([item, ...readHistory()]);
@@ -1315,6 +1324,7 @@ export function Workspace() {
           scenes: analysis.scenes,
           frameCount: shots.length,
           thumb: thumbRef.current,
+          dnk: днкДляИстории(днк),
         }),
       });
       const data = (await res.json()) as { item?: HistoryItem; error?: string; detail?: string };
@@ -1327,7 +1337,7 @@ export function Workspace() {
       setSaveState("error");
       pushToast("error", "Не удалось сохранить", e instanceof Error ? e.message : undefined);
     }
-  }, [analysis, bundle, draftEn, draftRu, meta, pushToast, refreshHistory, shots.length, tags]);
+  }, [analysis, bundle, draftEn, draftRu, днк, meta, pushToast, refreshHistory, shots.length, tags]);
 
   const openHistoryItem = useCallback((item: HistoryItem) => {
     const a = analysisFromRow(item);
@@ -1484,8 +1494,45 @@ export function Workspace() {
         </>
       ) : null}
 
+      {/*  ПЕРЕКЛЮЧАТЕЛЬ РЕЖИМОВ. Слева — прежний РЕВЕРС, справа — разбор
+           ролика на сцены. Экраны не мешают друг другу.              */}
       {meta ? (
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.03fr)_minmax(0,1fr)]">
+        <div className="panel flex flex-wrap items-center gap-1.5 p-1.5">
+          {([
+            ["prompt", "Промпт", "кадры, метрики, промпт"],
+            ["dnk", "ДНК ролика", "сцены, переходы, гены"],
+          ] as const).map(([id, имя, что]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setРежим(id)}
+              aria-pressed={режим === id}
+              className={`flex-1 rounded-xl px-3.5 py-2 text-left transition ${
+                режим === id
+                  ? "bg-ember/14 text-ember shadow-[inset_0_0_0_1px_rgba(255,106,43,0.35)]"
+                  : "text-muted hover:bg-white/5 hover:text-chalk"
+              }`}
+            >
+              <span className="block font-display text-[13px] font-bold uppercase tracking-[0.07em]">
+                {имя}
+              </span>
+              <span className="block text-[11.5px] text-dim">{что}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {meta ? (
+        <div
+          /*  grid-cols-1 обязателен: без него колонка на узком экране
+              тянется под самый широкий кусок содержимого и выталкивает
+              плеер за край экрана.                                   */
+          className={`grid grid-cols-1 gap-4 ${
+            режим === "dnk"
+              ? "xl:grid-cols-[minmax(0,440px)_minmax(0,1fr)]"
+              : "xl:grid-cols-[minmax(0,1.03fr)_minmax(0,1fr)]"
+          }`}
+        >
           <div className="space-y-3">
             {sourceUrl ? (
               <VideoStage
@@ -1579,8 +1626,33 @@ export function Workspace() {
             ) : null}
           </div>
 
+          {/* ---------- правая колонка: ДНК ---------- */}
+          {режим === "dnk" ? (
+            sourceUrl ? (
+              <DnkStage
+                videoRef={videoRef}
+                meta={meta}
+                analysis={analysis}
+                готово={phase === "ready"}
+                времяПлеера={currentTime}
+                onПеремотать={seek}
+                onДНК={setДНК}
+                onСообщение={pushToast}
+              />
+            ) : (
+              <div className="panel p-5 text-[13px] leading-relaxed text-muted">
+                Запись из истории открыта без самого файла — ДНК собирается только по
+                видео. Загрузите ролик заново, чтобы разобрать его на сцены.
+              </div>
+            )
+          ) : null}
+
           {/* ---------- right column ---------- */}
-          <div className="panel flex min-h-[420px] flex-col overflow-hidden">
+          <div
+            className={`panel min-h-[420px] flex-col overflow-hidden ${
+              режим === "dnk" ? "hidden" : "flex"
+            }`}
+          >
             <div className="flex items-center gap-1 border-b border-line-soft px-2 py-2">
               {TABS.map((t) => {
                 const active = tab === t.id;
