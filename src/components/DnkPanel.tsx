@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import {
   ВИДЫ_ПЕРЕХОДА,
   ЗНАЧКИ_ПЕРЕХОДА,
+  КРУПНОСТИ,
   СЛОТЫ_СЦЕНЫ,
   type ВидПерехода,
   type ДНК,
@@ -13,6 +14,13 @@ import {
   type СценаДНК,
 } from "@/lib/dnk/types";
 import { файлДНК } from "@/lib/dnk/файл";
+import {
+  порядокКартинок,
+  планМонтажа,
+  текстСцены,
+  type РежимКадров,
+  type ЯзыкТекста,
+} from "@/lib/dnk/seedance";
 
 /*  ЭКРАН «ДНК РОЛИКА».
 
@@ -63,6 +71,15 @@ type Свойства = {
   onСкачать: () => void;
   скачивается: boolean;
   onПересобрать: () => void;
+  /*  Карточка «Для Seedance»: как владелец заводит сцену на сайте и
+      на каком языке ему нужен текст.                               */
+  режим: РежимКадров;
+  язык: ЯзыкТекста;
+  формат: string;
+  onРежим: (р: РежимКадров) => void;
+  onЯзык: (я: ЯзыкТекста) => void;
+  onОтметить: (sceneId: string) => void;
+  onСкачатьКадр: (sceneId: string, какой: "первый" | "последний") => void;
 };
 
 function секунды(v: number): string {
@@ -95,9 +112,47 @@ export function DnkPanel(п: Свойства) {
     onСкачать,
     скачивается,
     onПересобрать,
+    режим,
+    язык,
+    формат,
+    onРежим,
+    onЯзык,
+    onОтметить,
+    onСкачатьКадр,
   } = п;
 
   const [показатьФайл, setПоказатьФайл] = useState(false);
+  /*  Короткая весть «Скопировано» — буфер молчит, и без неё непонятно,
+      сработала кнопка или нет.                                      */
+  const [весть, setВесть] = useState<string | null>(null);
+  const сказать = (текст: string) => {
+    setВесть(текст);
+    window.setTimeout(() => setВесть(null), 1600);
+  };
+  /*  Буфер обмена доступен не везде (старый браузер, страница без
+      https). Тогда подкладываем скрытое поле и копируем по-старому. */
+  const скопировать = async (текст: string) => {
+    try {
+      await navigator.clipboard.writeText(текст);
+      сказать("Скопировано");
+      return;
+    } catch {
+      /* падаем в запасной способ ниже */
+    }
+    try {
+      const поле = document.createElement("textarea");
+      поле.value = текст;
+      поле.style.position = "fixed";
+      поле.style.opacity = "0";
+      document.body.appendChild(поле);
+      поле.select();
+      const вышло = document.execCommand("copy");
+      document.body.removeChild(поле);
+      сказать(вышло ? "Скопировано" : "Выделите текст и скопируйте вручную");
+    } catch {
+      сказать("Выделите текст и скопируйте вручную");
+    }
+  };
 
   const индекс = useMemo(() => {
     if (!днк) return -1;
@@ -211,6 +266,7 @@ export function DnkPanel(п: Свойства) {
               >
                 <b className="font-display text-[13px] text-chalk">
                   {i + 1}. {с.имя.replace(/^Сцена \d+$/, "")}
+                  {с.сгенерирована ? <span className="ml-1 text-good">✓</span> : null}
                 </b>
                 <small className="truncate text-[11.5px] text-muted">
                   {с.слоты.length ? с.слоты.map((х) => `[${х}]`).join(" ") : секунды(с.конец - с.начало)}
@@ -245,7 +301,9 @@ export function DnkPanel(п: Свойства) {
       </div>
 
       {/* ---------- сцена + подстановка ---------- */}
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+      {/*  Карточке «Для Seedance» нужно больше места, чем карточке
+           сцены: в ней список картинок и готовый текст.          */}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
         <div className="panel p-4">
           {сцена ? (
             <КарточкаСцены
@@ -268,7 +326,24 @@ export function DnkPanel(п: Свойства) {
           )}
         </div>
 
-        <div className="panel grid content-start gap-3 p-4 opacity-70">
+        <div className="grid content-start gap-3">
+          {сцена ? (
+            <КарточкаSeedance
+              сцена={сцена}
+              номер={индекс + 1}
+              кадры={кадры.get(сцена.id) ?? null}
+              режим={режим}
+              язык={язык}
+              формат={формат}
+              onРежим={onРежим}
+              onЯзык={onЯзык}
+              onОтметить={() => onОтметить(сцена.id)}
+              onСкачатьКадр={(какой) => onСкачатьКадр(сцена.id, какой)}
+              onКопировать={скопировать}
+            />
+          ) : null}
+
+          <div className="panel grid content-start gap-3 p-4 opacity-70">
           <h2 className="font-display text-[17px] font-bold text-chalk">Что подставляем</h2>
           <p className="text-[12.5px] leading-relaxed text-muted">
             Здесь выбирают свет, героя, место и товар — и каждая сцена рисуется заново с
@@ -293,6 +368,7 @@ export function DnkPanel(п: Свойства) {
             <b className="text-ice">🔒 Не меняется:</b> сюжет, композиция, камера, ритм,
             переходы. Их держат первый и последний кадр каждой сцены.
           </p>
+          </div>
         </div>
       </div>
 
@@ -378,6 +454,94 @@ export function DnkPanel(п: Свойства) {
             {JSON.stringify(файлДНК(днк), null, 2)}
           </pre>
         ) : null}
+      </div>
+
+      {/* ---------- план монтажа ---------- */}
+      <ПланМонтажа днк={днк} выбрана={выбрана} onВыбрать={onВыбрать} onКопировать={скопировать} />
+
+      {весть ? (
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-good px-4 py-2 text-[13.5px] font-bold text-[#04140b] shadow-lg">
+          {весть}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
+/*  ПЛАН МОНТАЖА. Сцены сверху вниз с переходами между ними: по нему
+    ролик склеивают в любом редакторе.                               */
+function ПланМонтажа({
+  днк,
+  выбрана,
+  onВыбрать,
+  onКопировать,
+}: {
+  днк: ДНК;
+  выбрана: string | null;
+  onВыбрать: (id: string) => void;
+  onКопировать: (текст: string) => void;
+}) {
+  const всего = днк.сцены.reduce((a, с) => a + (с.конец - с.начало), 0);
+  const готовых = днк.сцены.filter((с) => с.сгенерирована).length;
+
+  return (
+    <div className="panel p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-display text-[17px] font-bold text-chalk">План монтажа</h2>
+        <span className="rounded-full bg-ice/12 px-2.5 py-1 font-mono text-[12px] text-ice">
+          {готовых} из {днк.сцены.length} сцен готово · {всего.toFixed(1)} с
+        </span>
+      </div>
+      <p className="mt-1.5 text-[13px] leading-relaxed text-muted">
+        Склейте готовые сцены сверху вниз с этими переходами и длительностями — в CapCut
+        или любом другом редакторе.
+      </p>
+
+      <div className="mt-3 grid gap-1.5">
+        {днк.сцены.map((с, i) => {
+          const переход = днк.переходы[i];
+          return (
+            <div key={с.id} className="grid gap-1.5">
+              <button
+                type="button"
+                onClick={() => onВыбрать(с.id)}
+                className={`grid grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-2.5 rounded-lg border bg-raised px-2.5 py-2 text-left text-[13.5px] ${
+                  с.id === выбрана ? "border-ember" : "border-line"
+                }`}
+              >
+                <span className="font-display text-muted">{i + 1}</span>
+                <span className="min-w-0 truncate text-chalk">
+                  {с.имя} <span className="text-dim">· s{i + 1}.mp4</span>{" "}
+                  {с.сгенерирована ? <span className="text-good">✓</span> : null}
+                </span>
+                <span className="font-mono text-muted">{(с.конец - с.начало).toFixed(1)} с</span>
+              </button>
+              {переход ? (
+                <div className="grid grid-cols-[28px_minmax(0,1fr)] gap-2.5 rounded-lg border border-dashed border-line px-2.5 py-1.5 text-[13px] text-flare">
+                  <span>↓</span>
+                  <span>
+                    {переход.вид}
+                    {переход.длительность > 0
+                      ? ` · ${переход.длительность.toFixed(1).replace(".", ",")} с`
+                      : ""}
+                  </span>
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-3">
+        <button
+          type="button"
+          className="btn btn-ghost"
+          onClick={() => onКопировать(планМонтажа(днк))}
+        >
+          Копировать план
+        </button>
       </div>
     </div>
   );
@@ -512,16 +676,23 @@ function КарточкаСцены({
           />
           <ГенПоле
             замок
-            имя="Действие"
+            имя="Что происходит"
             значение={сцена.гены.действие}
-            подсказка="что происходит в кадре"
+            подсказка="например: рука ставит сумку на мраморный стол"
             onChange={(v) => onГены({ sceneId: сцена.id, поле: "действие", значение: v })}
           />
           <ГенПоле
             замок
+            имя="То же по-английски"
+            значение={сцена.гены.действиеEn}
+            подсказка="можно не заполнять — пойдёт русская фраза"
+            onChange={(v) => onГены({ sceneId: сцена.id, поле: "действиеEn", значение: v })}
+          />
+          <ГенСписок
             имя="План"
             значение={сцена.гены.план}
-            подсказка="крупный / средний / общий"
+            варианты={КРУПНОСТИ}
+            пусто="не определено"
             onChange={(v) => onГены({ sceneId: сцена.id, поле: "план", значение: v })}
           />
           <ГенПоле
@@ -698,6 +869,45 @@ function Ген({
   );
 }
 
+/*  Ген, у которого значений конечный набор: его выбирают, а не
+    печатают. Автоопределение остаётся — просто его можно сменить. */
+function ГенСписок({
+  имя,
+  значение,
+  варианты,
+  пусто,
+  onChange,
+}: {
+  имя: string;
+  значение: string;
+  варианты: readonly string[];
+  пусто: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="grid grid-cols-[22px_minmax(0,1fr)] gap-2 rounded-lg border border-line bg-raised px-2.5 py-1.5 text-[13px]">
+      <span className="text-ice">🔒</span>
+      <div className="min-w-0">
+        <div className="text-[11.5px] font-semibold uppercase tracking-[0.05em] text-muted">
+          {имя}
+        </div>
+        <select
+          value={значение}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full bg-transparent text-chalk outline-none"
+        >
+          <option value="">{пусто}</option>
+          {варианты.map((в) => (
+            <option key={в} value={в}>
+              {в}
+            </option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+}
+
 function ГенПоле({
   замок,
   имя,
@@ -728,6 +938,177 @@ function ГенПоле({
           onChange={(e) => onChange(e.target.value)}
           className="w-full bg-transparent text-chalk outline-none placeholder:text-dim"
         />
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
+/*  КАРТОЧКА «ДЛЯ SEEDANCE».
+
+    Владелец генерирует сцены руками на сайте Seedance. Здесь — ровно
+    то, что ему нужно перед глазами: в каком порядке загрузить
+    картинки, какой текст вставить и какую длительность выставить.
+    Номера картинок в тексте те же, что в списке: и список, и текст
+    строит один и тот же код.                                        */
+function КарточкаSeedance({
+  сцена,
+  номер,
+  кадры,
+  режим,
+  язык,
+  формат,
+  onРежим,
+  onЯзык,
+  onОтметить,
+  onСкачатьКадр,
+  onКопировать,
+}: {
+  сцена: СценаДНК;
+  номер: number;
+  кадры: КадрыСцены | null;
+  режим: РежимКадров;
+  язык: ЯзыкТекста;
+  формат: string;
+  onРежим: (р: РежимКадров) => void;
+  onЯзык: (я: ЯзыкТекста) => void;
+  onОтметить: () => void;
+  onСкачатьКадр: (какой: "первый" | "последний") => void;
+  onКопировать: (текст: string) => void;
+}) {
+  const длина = (сцена.конец - сцена.начало).toFixed(1);
+  const картинки = порядокКартинок(сцена, режим, номер);
+  const текст = текстСцены(сцена, { режим, язык, номер });
+  const естьПодмена = сцена.слоты.includes("товар") || сцена.слоты.includes("герой");
+
+  const превью = (вид: string): string | null => {
+    if (вид === "первый") return кадры?.первый?.url ?? null;
+    if (вид === "последний") return кадры?.последний?.url ?? null;
+    return null;
+  };
+
+  return (
+    <div className="panel grid gap-3.5 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-display text-[17px] font-bold text-chalk">Для Seedance</h2>
+        <span className="rounded-full bg-ice/12 px-2.5 py-1 font-mono text-[12px] text-ice">
+          длительность {длина} с · {формат}
+        </span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="inline-flex gap-0.5 rounded-xl border border-line bg-[#0a0a0f] p-0.5">
+          {(
+            [
+              ["кадры", "Первый + последний кадр"],
+              ["образцы", "По образцам"],
+            ] as const
+          ).map(([ключ, имя]) => (
+            <button
+              key={ключ}
+              type="button"
+              aria-pressed={режим === ключ}
+              onClick={() => onРежим(ключ)}
+              className={`rounded-lg px-2.5 py-1.5 text-[13px] ${
+                режим === ключ ? "bg-raised text-chalk" : "text-muted hover:text-chalk"
+              }`}
+            >
+              {имя}
+            </button>
+          ))}
+        </div>
+        <div className="inline-flex gap-0.5 rounded-xl border border-line bg-[#0a0a0f] p-0.5">
+          {(["en", "ru"] as const).map((ключ) => (
+            <button
+              key={ключ}
+              type="button"
+              aria-pressed={язык === ключ}
+              onClick={() => onЯзык(ключ)}
+              className={`rounded-lg px-3 py-1.5 text-[13px] uppercase ${
+                язык === ключ ? "bg-raised text-chalk" : "text-muted hover:text-chalk"
+              }`}
+            >
+              {ключ}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <p className="hud-label">1 · Загрузите картинки в этом порядке</p>
+        <div className="mt-1.5 grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(120px,1fr))]">
+          {картинки.map((к, j) => (
+            <div
+              key={к.вид}
+              className="grid gap-1.5 rounded-xl border border-line bg-raised p-2 text-[12.5px]"
+            >
+              <span className="font-display text-[13px] text-chalk">
+                {j + 1}. {к.имя}
+              </span>
+              <div
+                className="relative overflow-hidden rounded-lg border border-edge bg-void"
+                style={{ aspectRatio: "9 / 12" }}
+              >
+                {превью(к.вид) ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={превью(к.вид)!} alt={к.имя} className="h-full w-full object-cover" />
+                ) : (
+                  <span className="grid h-full place-items-center px-2 text-center text-[11px] text-dim">
+                    ваше фото
+                  </span>
+                )}
+                <span className="absolute left-1.5 top-1.5 rounded-full bg-black/55 px-1.5 py-0.5 text-[10px] text-chalk">
+                  картинка {j + 1}
+                </span>
+              </div>
+              <span className="truncate text-dim" title={к.файл}>
+                {к.файл}
+              </span>
+              {к.скачиваемый ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost px-2.5 py-1 text-[12px]"
+                  onClick={() => onСкачатьКадр(к.вид === "первый" ? "первый" : "последний")}
+                >
+                  Скачать
+                </button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {режим === "кадры" && естьПодмена ? (
+        <p className="rounded-xl border border-dashed border-flare/45 px-3 py-2.5 text-[13px] text-[#f3dca6]">
+          Если ваш Seedance в режиме «первый + последний кадр» не даёт добавить фото
+          товара или героя — сначала замените их <b>в самих кадрах</b> (в любой нейросети
+          для картинок), потом грузите только два кадра. Так композиция удержится точнее.
+        </p>
+      ) : null}
+
+      <div>
+        <p className="hud-label">2 · Текст сцены</p>
+        <pre className="mt-1.5 whitespace-pre-wrap break-words rounded-xl border border-edge bg-[#0a0a0f] p-3.5 font-mono text-[13px] leading-relaxed text-[#e6e3f0]">
+          {текст}
+        </pre>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" className="btn btn-primary" onClick={() => onКопировать(текст)}>
+          Копировать текст
+        </button>
+        <button
+          type="button"
+          className={`btn btn-ghost ${сцена.сгенерирована ? "text-good" : ""}`}
+          onClick={onОтметить}
+        >
+          {сцена.сгенерирована ? "✓ Сцена сгенерирована" : "Отметить: сгенерировал"}
+        </button>
+        <span className="text-[13px] text-muted">
+          3 · Длительность в Seedance: <b className="text-chalk">{длина} с</b> (или
+          ближайшая, потом обрежете)
+        </span>
       </div>
     </div>
   );

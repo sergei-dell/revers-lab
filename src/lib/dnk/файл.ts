@@ -1,3 +1,4 @@
+import { файлSeedance, type РежимКадров } from "@/lib/dnk/seedance";
 import type {
   ДНК,
   ДНКдляИстории,
@@ -31,6 +32,7 @@ export function описаниеДНК(днк: ДНК): ДНКдляИстори
         slots: с.слоты,
         locked: {
           действие: с.гены.действие,
+          действиеEn: с.гены.действиеEn,
           план: с.гены.план,
           камера: с.гены.камера,
           ритм: Number((с.конец - с.начало).toFixed(3)),
@@ -41,6 +43,7 @@ export function описаниеДНК(днк: ДНК): ДНКдляИстори
           место: с.гены.место,
           товар: с.гены.товар,
         },
+        сгенерирована: Boolean(с.сгенерирована),
         first: `s${i + 1}_first.jpg`,
         last: `s${i + 1}_last.jpg`,
         transition_out: переход ? переход.вид : null,
@@ -71,10 +74,12 @@ export function файлДНК(днк: ДНК): Record<string, unknown> {
         slots: с.слоты,
         locked: {
           action: с.гены.действие,
+          action_en: с.гены.действиеEn,
           shot: с.гены.план,
           camera: с.гены.камера,
           rhythm: Number((с.конец - с.начало).toFixed(3)),
         },
+        generated: Boolean(с.сгенерирована),
         replace: {
           light: с.гены.свет,
           hero: с.гены.герой,
@@ -99,10 +104,14 @@ export function файлДНК(днк: ДНК): Record<string, unknown> {
 export async function архивДНК(
   днк: ДНК,
   кадры: Map<string, КадрыСцены>,
+  режим: РежимКадров = "кадры",
 ): Promise<Blob> {
   const { default: JSZip } = await import("jszip");
   const zip = new JSZip();
   zip.file("dnk.json", JSON.stringify(файлДНК(днк), null, 2));
+  /*  Памятка для ручной генерации: порядок картинок, тексты и план
+      монтажа. С ней архив самодостаточен — сайт открывать не нужно. */
+  zip.file("seedance.txt", файлSeedance(днк, режим));
 
   днк.сцены.forEach((с, i) => {
     const набор = кадры.get(с.id);
