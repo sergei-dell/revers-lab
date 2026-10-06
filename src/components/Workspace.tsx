@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { Dropzone } from "@/components/Dropzone";
+import { Revers2 } from "@/components/Revers2";
 import { DnkStage, днкДляИстории } from "@/components/DnkStage";
 import { FrameBoard, type ExtractMode } from "@/components/FrameBoard";
 import { HistoryPanel } from "@/components/HistoryPanel";
@@ -1477,6 +1478,18 @@ export function Workspace() {
 
   return (
     <div className="space-y-4">
+      {/*  ГЛАВНЫЙ ПУТЬ РЕВЕРСА 2. Прежние инструменты никуда не делись —
+           они ниже, в свёрнутом блоке.                               */}
+      <Revers2 onФайл={handleFile} onСообщение={pushToast} />
+
+      <details className="panel group overflow-hidden" open={false}>
+        <summary className="cursor-pointer px-4 py-3 font-display text-[13.5px] font-bold uppercase tracking-[0.07em] text-chalk">
+          Подробный разбор и другие инструменты
+          <span className="ml-2 font-body text-[12px] font-normal normal-case tracking-normal text-dim">
+            промпт, ДНК ролика, кадры, метрики, история
+          </span>
+        </summary>
+        <div className="space-y-4 border-t border-line-soft p-4">
       {phase === "idle" && !meta ? (
         <>
           {fatal ? (
@@ -1814,6 +1827,8 @@ export function Workspace() {
           <p className="font-mono text-[11px] text-dim">{progress?.label ?? "…"}</p>
         </div>
       ) : null}
+        </div>
+      </details>
 
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </div>

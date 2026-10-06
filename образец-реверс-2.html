@@ -1,0 +1,362 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>РЕВЕРС 2 «Поверх оригинала»</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --void:#07070a; --panel:#101017; --raised:#16161f; --line:#212130; --edge:#2e2e40;
+  --chalk:#f4f1ea; --muted:#9b98a8; --dim:#6a6779;
+  --ember:#ff6a2b; --flare:#ffc247; --ice:#62d9e8; --good:#35d07f; --bad:#ff4d6d;
+  color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--void);color:var(--chalk);font:15px/1.5 Manrope,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+button,input,textarea,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--ember);outline-offset:2px;border-radius:6px}
+h1,h2,h3{font-family:'Chakra Petch',Manrope,sans-serif;margin:0;letter-spacing:.01em}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+.muted{color:var(--muted)} .dim{color:var(--dim)}
+.wrap{max-width:1100px;margin:0 auto;padding:14px 16px 80px;display:grid;gap:16px}
+.note{background:var(--chalk);color:#0b0b10;border-radius:14px;padding:11px 16px;font-size:13.5px}
+.top{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.logo{display:flex;align-items:center;gap:10px;font-family:'Chakra Petch',sans-serif;font-weight:700;font-size:18px;letter-spacing:.08em}
+.logo i{width:26px;height:26px;border-radius:6px;background:conic-gradient(from 200deg,var(--ember),var(--flare),#c7431a,var(--ember))}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:16px;display:grid;gap:12px;min-width:0;align-content:start}
+.lbl{font-size:11.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--dim);font-weight:600}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.btn{border:0;border-radius:12px;padding:11px 16px;font-weight:700;background:var(--ember);color:#160a04}
+.btn.ghost{background:transparent;border:1px solid var(--edge);color:var(--chalk);font-weight:600}
+.btn.small{padding:7px 12px;font-size:13px;border-radius:10px}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.field{display:grid;gap:5px;min-width:0}
+.field span{font-size:12.5px;color:var(--muted)}
+.field input,.field textarea{background:#0b0b10;border:1px solid var(--edge);border-radius:10px;padding:9px 12px;width:100%}
+.field textarea{min-height:60px;resize:vertical}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
+@media (max-width:860px){.grid2{grid-template-columns:1fr}}
+.steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+@media (max-width:640px){.steps{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.step{border:1px solid var(--line);border-radius:12px;padding:8px 11px;background:var(--raised);font-size:12.5px}
+.step b{font-family:'Chakra Petch',sans-serif;font-size:14px;display:block}
+.step.now{border-color:var(--ember);box-shadow:0 0 18px -6px var(--ember)}
+.step.done{border-color:rgba(53,208,127,.4)} .step.done b{color:var(--good)}
+
+/* 1 видео */
+.drop{border:2px dashed var(--edge);border-radius:16px;padding:22px;display:grid;gap:12px;place-items:center;text-align:center}
+.base{display:grid;grid-template-columns:140px minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:520px){.base{grid-template-columns:1fr}}
+.ph{aspect-ratio:9/16;width:140px;border-radius:14px;position:relative;overflow:hidden;border:1px solid var(--edge);background:linear-gradient(180deg,#9b8fc6,#6f6a9a 55%,#3b5a2c 56%,#2c4421)}
+.ph .bar{position:absolute;left:10%;right:6%;top:58%;height:3px;background:#5ab4ff}
+.ph .post{position:absolute;width:5px;background:#5ab4ff;top:58%;bottom:8%}
+.ph .fig{position:absolute;width:20%;height:30%;left:40%;top:30%;background:#e7c9a8;border-radius:40% 40% 15% 15%}
+.ph .t{position:absolute;left:6px;bottom:6px;font:10px 'JetBrains Mono',monospace;background:rgba(0,0,0,.6);padding:1px 6px;border-radius:999px}
+.checks{display:grid;gap:5px;font-size:13.5px}
+.checks div{display:flex;gap:8px;align-items:baseline}
+.ok{color:var(--good)} .wn{color:var(--flare)}
+
+/* 2 что меняем */
+.swaps{display:grid;gap:8px}
+.sw{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:start;padding:10px 12px;border-radius:12px;background:var(--raised);border:1px solid var(--line)}
+.sw.on{border-color:rgba(255,106,43,.45)}
+.tg{width:42px;height:24px;border-radius:999px;background:var(--edge);border:0;position:relative;flex:none;margin-top:2px}
+.tg::after{content:"";position:absolute;left:3px;top:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:left .15s}
+.tg[aria-pressed="true"]{background:var(--ember)} .tg[aria-pressed="true"]::after{left:21px}
+.sw b{font-size:14px} .sw small{display:block;color:var(--muted);font-size:12.5px}
+.sw .field{margin-top:6px}
+.img{font:12px 'JetBrains Mono',monospace;color:var(--ember);background:rgba(255,106,43,.12);border:1px solid rgba(255,106,43,.35);border-radius:6px;padding:0 6px;margin-left:6px}
+
+/* 3 моменты */
+.tl{position:relative;height:44px;border-radius:10px;background:var(--raised);border:1px solid var(--line);margin-top:4px}
+.tl .mk{position:absolute;top:6px;bottom:6px;width:3px;border-radius:2px;background:var(--flare);transform:translateX(-1px)}
+.tl .mk.gag{background:var(--ember);width:5px}
+.tl .sc{position:absolute;top:0;bottom:0;border-right:1px dashed var(--edge)}
+.ticks{display:flex;justify-content:space-between;font-size:11px;color:var(--dim)}
+.moments{display:grid;gap:6px}
+.mo{display:grid;grid-template-columns:76px minmax(0,1fr) 30px;gap:8px;align-items:center}
+.mo input{background:#0b0b10;border:1px solid var(--edge);border-radius:9px;padding:7px 10px;width:100%;font-size:13.5px}
+.mo .x{border:1px solid var(--edge);background:transparent;border-radius:8px;height:32px;color:var(--muted)}
+.mo.gag input{border-color:rgba(255,106,43,.5)}
+
+/* 4 шаблон */
+pre{margin:0;background:#0a0a0f;border:1px solid var(--line);border-radius:12px;padding:12px;font:12px/1.55 'JetBrains Mono',monospace;color:#d8d5e6;overflow:auto;max-height:420px;white-space:pre-wrap}
+pre .h{color:var(--ice);font-weight:600} pre .s{color:var(--ember)} pre .q{color:var(--flare)}
+.load{display:grid;gap:4px;font-size:13.5px}
+.load div{display:flex;gap:10px;padding:6px 10px;border-radius:9px;background:var(--raised)}
+.load .mono{color:var(--ember);min-width:64px}
+.set{display:flex;gap:6px;flex-wrap:wrap}
+.set span{border:1px solid var(--edge);border-radius:999px;padding:3px 10px;font-size:12.5px;background:var(--raised)}
+
+/* подробно */
+details.more{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:12px 16px}
+details.more>summary{cursor:pointer;font-family:Manrope,sans-serif;font-weight:600;font-size:15px;list-style:none;display:flex;justify-content:space-between;gap:10px}
+details.more>summary::-webkit-details-marker{display:none}
+details.more>summary::after{content:"＋";color:var(--muted)} details.more[open]>summary::after{content:"－"}
+.inner{display:grid;gap:14px;margin-top:12px}
+.board{display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:6px}
+.fr{display:grid;gap:3px}
+.fr .im{aspect-ratio:9/16;border-radius:8px;border:1px solid var(--edge);position:relative;overflow:hidden;background:linear-gradient(180deg,#8f86c0,#3a3550 58%,#2c4421 59%)}
+.fr .im i{position:absolute;width:22%;height:32%;background:#e7c9a8;border-radius:40% 40% 15% 15%;left:39%;bottom:22%}
+.fr .im span{position:absolute;left:3px;top:3px;font:9.5px 'JetBrains Mono',monospace;background:rgba(0,0,0,.6);padding:0 4px;border-radius:999px}
+.fr small{font-size:11px;color:var(--muted);line-height:1.25}
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th,.tbl td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+.tbl th{color:var(--dim);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+.pal{display:flex;gap:6px} .pal i{width:30px;height:30px;border-radius:7px;border:1px solid var(--edge);display:block}
+.tools{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px}
+.tool{padding:10px 12px;border-radius:12px;background:var(--raised);border:1px solid var(--line);font-size:13px}
+.tool b{display:block;font-size:14px}
+.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--good);color:#04140b;font-weight:700;padding:10px 16px;border-radius:12px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:9}
+.toast.on{opacity:1}
+[hidden]{display:none!important}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+  <div class="note"><b>Макет РЕВЕРС 2.</b> На виду только главный путь: <b>ролик → фишка → Claude пишет шаблон → генерация → витрина</b>. Блок «Claude» работает в двух режимах: <b>сейчас — вручную</b> (скачали пакет, отдали Claude в чат, вставили ответ, сгенерировали в SYNTX сами) и <b>потом — автоматически</b> (после подключения API Claude и Seedance всё идёт само, вы только ставите оценку). Всё старое не удалено — оно в двух свёрнутых блоках внизу. Попробуйте переключить режим в блоке 3.</div>
+
+  <div class="top"><div class="logo"><i></i>РЕВЕРС <span class="dim" style="font-family:Manrope;font-weight:500;font-size:13px;letter-spacing:0">поверх оригинала</span></div></div>
+  <div class="steps" id="steps"></div>
+
+  <!-- 1 -->
+  <section class="card">
+    <div class="lbl">1 · Видео-основа</div>
+    <div class="drop" id="drop">
+      <div class="muted">Перетащите ролик-тренд. Лучше исходный файл, а не запись экрана.</div>
+      <button class="btn" id="pick">Выбрать ролик</button>
+    </div>
+    <div class="base" id="base" hidden>
+      <div class="ph"><div class="post" style="left:20%"></div><div class="post" style="left:48%"></div><div class="post" style="left:86%"></div><div class="bar"></div><div class="fig"></div><span class="t">8,2 с</span></div>
+      <div style="display:grid;gap:10px">
+        <div><b>турник.mp4</b> <span class="dim mono" style="font-size:12px">· исходник 384×848 · запись экрана</span></div>
+        <div class="checks">
+          <div><span class="ok">✓</span> Интерфейс Instagram и подписи обрезаны</div>
+          <div><span class="ok">✓</span> Шум убран, резкость, 1080×1920, 30 к/с, высокий битрейт</div>
+          <div><span class="ok">✓</span> Вертикаль 9:16 · 8,2 сек — в пределах лимита Seedance</div>
+          <div><span class="wn">!</span> Исходник мелкий (316×560 после обрезки). Если Seedance не примет — возьмите исходный файл ролика или версию 720×1280.</div>
+        </div>
+        <div class="row">
+          <button class="btn small" data-toast="Скачано: основа-1080x1920.mp4">Скачать основу 1080×1920</button>
+          <button class="btn ghost small" data-toast="Скачано: основа-720x1280.mp4">Запасная 720×1280</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="work" hidden style="display:grid;gap:16px">
+    <!-- 2 -->
+    <section class="card">
+      <div class="lbl">2 · Фишка и что меняем</div>
+      <label class="field"><span>В чём фишка — одной строкой (можно по-русски, Claude переведёт)</span><input id="gag" value="Лихо крутится на низком турнике, очки слетают, в конце держится за голову и смеётся"></label>
+      <div class="swaps" id="swaps"></div>
+    </section>
+
+    <!-- 3 -->
+    <section class="card" style="border-color:rgba(98,217,232,.45)">
+      <div class="row" style="justify-content:space-between">
+        <div class="lbl">3 · Claude пишет шаблон</div>
+        <div class="row" style="gap:6px">
+          <button class="btn small" data-mode="hand">Сейчас: вручную</button>
+          <button class="btn ghost small" data-mode="auto">Потом: автоматически</button>
+        </div>
+      </div>
+      <div id="m-hand" style="display:grid;gap:10px">
+        <div class="load">
+          <div><span class="mono">1</span><span>Скачайте пакет: видео-основа, раскадровка, ДНК, фишка, задача для Claude</span></div>
+          <div><span class="mono">2</span><span>Отправьте архив Claude в чат</span></div>
+          <div><span class="mono">3</span><span>Вставьте ответ Claude ниже</span></div>
+        </div>
+        <div class="row"><button class="btn small" id="pack">Скачать пакет для Claude</button></div>
+      </div>
+      <div id="m-auto" hidden style="display:grid;gap:10px">
+        <div class="muted" style="font-size:13.5px">Сайт сам отправляет пакет в Claude по API и получает шаблон. Ключ API — в настройках сервера.</div>
+        <div class="row"><button class="btn small" id="ask">Отправить Claude</button><span class="dim" id="askst" style="font-size:12.5px"></span></div>
+      </div>
+      <label class="field"><span>Шаблон от Claude</span><textarea id="claude" style="min-height:140px;font:12px/1.5 'JetBrains Mono',monospace" placeholder="Сюда вставляется (или приходит сам) шаблон «поверх оригинала»"></textarea></label>
+    </section>
+
+    <!-- 4 -->
+    <section class="card">
+      <div class="row" style="justify-content:space-between"><div class="lbl">4 · Генерация</div><div class="set"><span>9:16</span><span>8 сек</span><span>Seedance 2.5</span></div></div>
+      <div id="g-hand" style="display:grid;gap:10px">
+        <div class="dim" style="font-size:12.5px">Загрузите в SYNTX в таком порядке и вставьте шаблон:</div>
+        <div class="load" id="load"></div>
+        <div class="row"><button class="btn small" id="copyc">Копировать шаблон</button></div>
+      </div>
+      <div id="g-auto" hidden style="display:grid;gap:10px">
+        <div class="row"><button class="btn small" id="gen">Отправить в Seedance · пробно, дёшево</button><span class="dim" id="genst" style="font-size:12.5px"></span></div>
+        <div id="vid" hidden class="ph" style="width:120px"><div class="post" style="left:20%"></div><div class="post" style="left:48%"></div><div class="post" style="left:86%"></div><div class="bar"></div><div class="fig" style="background:#c9a58a"></div><span class="t">проба</span></div>
+      </div>
+      <div class="row" style="justify-content:space-between"><span class="lbl" style="font-size:10.5px">Оценка результата</span><span class="mono dim" id="score">испытание: 0 из 10</span></div>
+      <div class="row" id="marks">
+        <button class="btn ghost small" data-mark="g">Отлично</button>
+        <button class="btn ghost small" data-mark="m">Средне — доработать</button>
+        <button class="btn ghost small" data-mark="b">Плохо</button>
+      </div>
+      <div id="bugbox" hidden style="display:grid;gap:8px">
+        <label class="field"><span>Что не так</span><input id="bug" placeholder="например: длинные волосы, стоит в начале, 16:9"></label>
+        <div class="row"><button class="btn ghost small" id="fix">Отправить Claude на доработку</button><span class="dim" style="font-size:12px">вручную — баг попадёт в пакет; автоматически — Claude сам поправит шаблон</span></div>
+      </div>
+    </section>
+
+    <!-- 5 -->
+    <section class="card">
+      <div class="lbl">5 · Витрина</div>
+      <div class="row"><button class="btn" id="vitr" disabled>На витрину</button><span class="dim" style="font-size:12.5px">Доступно после «Отлично». Уходит: видео-основа, шаблон, список фото для клиента, пример результата.</span></div>
+    </section>
+  </section>
+
+  <!-- ручная -->
+  <details class="more">
+    <summary>Ручная настройка шаблона (без Claude)</summary>
+    <div class="inner">
+      <label class="field"><span>Что в кадре нельзя менять (форма и место)</span><input id="lock" value="the low metal bar at hip height on blue painted posts"></label>
+      <div>
+        <div class="tl" id="tl"></div>
+        <div class="ticks"><span>0</span><span>2</span><span>4</span><span>6</span><span>8,2 с</span></div>
+      </div>
+      <div class="moments" id="moments"></div>
+      <div class="row"><button class="btn ghost small" id="addm">+ Момент</button></div>
+      <pre id="tpl"></pre>
+      <div class="row"><button class="btn ghost small" id="copy">Копировать шаблон кодом</button><button class="btn ghost small" id="usecode">Подставить в блок 3</button></div>
+    </div>
+  </details>
+
+  <!-- подробно -->
+  <details class="more" id="more">
+    <summary>Подробный разбор и другие инструменты</summary>
+    <div class="inner">
+      <div class="lbl">Раскадровка · каждые 0,5 сек</div>
+      <div class="board" id="board"></div>
+      <div class="grid2">
+        <div><div class="lbl" style="margin-bottom:6px">Сцены и переходы</div><table class="tbl"><tr><th>Сцена</th><th>Время</th><th>Склейка</th></tr><tr><td>1 · один дубль</td><td>0,0–8,2</td><td class="dim">нет</td></tr></table></div>
+        <div><div class="lbl" style="margin-bottom:6px">Камера · свет · цвет</div><table class="tbl"><tr><th>Камера</th><td>с рук, вертикально, 2–3 м, дрожание 0,6 %</td></tr><tr><th>Свет</th><td>сумерки, облачно</td></tr></table><div class="pal" style="margin-top:8px"><i style="background:#403d42"></i><i style="background:#565977"></i><i style="background:#8f86c0"></i><i style="background:#c79ab8"></i><i style="background:#3b5a2c"></i><i style="background:#5ab4ff"></i></div></div>
+      </div>
+      <div class="lbl">Другие режимы</div>
+      <div class="tools">
+        <div class="tool"><b>Шаблон «С нуля»</b><span class="muted">для простых сюжетов без видео-основы (как бойцы)</span></div>
+        <div class="tool"><b>ДНК ролика</b><span class="muted">гены сцен, ключевые кадры, скачать dnk.json</span></div>
+        <div class="tool"><b>По кадрам для Seedance</b><span class="muted">первый + последний кадр каждой сцены</span></div>
+        <div class="tool"><b>Пакет для Claude</b><span class="muted">всё выше в одном архиве для доработки</span></div>
+      </div>
+    </div>
+  </details>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+let stage=0, mark=null, mode='hand';
+const SW=[
+  {k:'face',t:'Лицо',d:'лицо героя крупно',on:true,img:true},
+  {k:'body',t:'Тело и волосы',d:'герой в полный рост; одежда с фото не берётся',on:true,img:true},
+  {k:'outfit',t:'Одежда',d:'текстом — на витрине клиент выбирает из вариантов',on:true,img:false,field:'Одежда (по-английски)',val:'fitted grey long-sleeve sports top, black athletic shorts, white sneakers'},
+  {k:'loc',t:'Место',d:'фото локации; «что нельзя менять» остаётся',on:false,img:true},
+  {k:'prod',t:'Товар',d:'заменяет предмет из оригинала',on:true,img:true,field:'Что в оригинале заменяем',val:'the orange sunglasses'}
+];
+const MOM=[
+  {t:'0,0',v:'standing behind the bar, both hands on it, mid-jump into the fold'},
+  {t:'1,2',v:'body horizontal above the bar'},
+  {t:'2,0',v:'second rotation, hanging upside down'},
+  {t:'3,4',v:'the sunglasses fly off and fall to the grass',gag:true},
+  {t:'4,2',v:'lands and crouches under the bar'},
+  {t:'6,5',v:'grabs the head with both hands and laughs',gag:true},
+  {t:'7,0',v:'sits on the grass, the sunglasses lying in front'}
+];
+const CUTS=[1.2,2.0,3.4,4.2,6.3,6.8];
+function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('on');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('on'),1700)}
+function steps(){
+  const n=[['Ролик','чистая видео-основа'],['Claude','пишет шаблон'],['Генерация','Seedance + оценка'],['Витрина','публикация']];
+  $('#steps').innerHTML=n.map((x,i)=>`<div class="step ${i<stage?'done':i===stage?'now':''}"><b>${i+1} · ${x[0]}</b><span class="dim">${x[1]}</span></div>`).join('');
+}
+function imgMap(){let n=0;const m={};SW.forEach(s=>{if(s.on&&s.img)m[s.k]=++n});return m}
+function renderSwaps(){
+  const m=imgMap();
+  $('#swaps').innerHTML=SW.map((s,i)=>`<div class="sw ${s.on?'on':''}"><button class="tg" data-sw="${i}" aria-pressed="${s.on}" aria-label="${s.t}"></button><div><b>${s.t}</b>${s.on&&s.img?`<span class="img">@image${m[s.k]}</span>`:''}<small>${s.d}</small>${s.field&&s.on?`<label class="field"><span>${s.field}</span><input data-f="${i}" value="${esc(s.val)}"></label>`:''}</div></div>`).join('');
+}
+function renderMoments(){
+  const dur=8.2;
+  $('#tl').innerHTML=CUTS.map(c=>`<div class="sc" style="left:0;width:${c/dur*100}%"></div>`).join('')+MOM.map(m=>{const t=parseFloat(m.t.replace(',','.'));return isNaN(t)?'':`<div class="mk ${m.gag?'gag':''}" style="left:${t/dur*100}%" title="${esc(m.v)}"></div>`}).join('');
+  $('#moments').innerHTML=MOM.map((m,i)=>`<div class="mo ${m.gag?'gag':''}"><input data-mt="${i}" value="${m.t}" aria-label="время, сек"><input data-mv="${i}" value="${esc(m.v)}" aria-label="что происходит"><button class="x" data-mx="${i}" title="Удалить">×</button></div>`).join('');
+}
+function ts(t){const x=parseFloat(String(t).replace(',','.'))||0;return '00:'+String(Math.floor(x)).padStart(2,'0')+'.'+Math.round((x%1)*10)}
+function H(t){return `<span class="h">${t}</span>`}
+function S(t){return `<span class="s">${t}</span>`}
+function Q(t){return `<span class="q">${esc(t)}</span>`}
+function build(){
+  const m=imgMap(), on=k=>SW.find(s=>s.k===k).on, val=k=>SW.find(s=>s.k===k).val;
+  const lock=$('#lock').value.trim()||'the main object';
+  const L=[];
+  L.push(H('CREATIVE MAPPING'));
+  L.push(`${S('@video1')} = base video and authoritative reference for every movement, timing, camera position, handheld shake, framing, ${esc(lock)}, performer scale, frame order, audio and duration.`);
+  if(on('face')) L.push(`${S('@image'+m.face)} = lead performer's facial identity only. No background, lighting or pose transfer.`);
+  if(on('body')) L.push(`${S('@image'+m.body)} = lead performer's body build and hair only. Ignore the clothing in it.`);
+  if(on('loc')) L.push(`${S('@image'+m.loc)} = environment only. Do not take people or objects from it.`);
+  if(on('prod')) L.push(`${S('@image'+m.prod)} = the exact object that replaces ${esc(val('prod'))}: shape, proportions, materials, colour. No printed text.`);
+  L.push('',H('ONE-SENTENCE SUMMARY'));
+  L.push(`Edit the existing ${S('@video1')} performance: ${esc($('#gag').value.trim())} — only the person${on('loc')?', the surroundings':''}${on('prod')?' and the object':''} change; motion, camera and timing stay exactly as in the source.`);
+  L.push('',H('MOTION LOCK — ABSOLUTE'));
+  const f=MOM[0];
+  if(f) L.push(`Frame 1 of the output equals frame 1 of ${S('@video1')}, pose for pose: ${esc(f.v)}. No intro, no delay, no extra beats.`);
+  L.push('Preserve every movement at its exact source time:');
+  MOM.forEach(x=>L.push(`  ${ts(x.t)} — ${esc(x.v)}${x.gag?'  ← THE GAG, cannot be skipped':''}`));
+  L.push('Same joint positions, grips, foot contacts, head angles, speed and momentum. Do not simplify, smooth or add movement.');
+  L.push('',H('CAMERA LOCK'));
+  L.push('Preserve the source camera exactly: handheld vertical phone, same position, height, shake, framing and motion blur. No new angles, reframing, zoom, stabilisation or slow motion. Same smartphone texture — not cinematic.');
+  L.push('',H('OBJECT LOCK — EVERY FRAME'));
+  L.push(`${esc(lock)} stays in every frame with identical shape, size and position. Body and hands never pass through it.`);
+  if(on('face')||on('body')||on('outfit')){
+    L.push('',H('PERFORMER'));
+    L.push('REPLACE COMPLETELY: no trace of the original performer — hair, body shape and clothes.');
+    if(on('face')) L.push(`FACE: apply ${S('@image'+m.face)} identity to the visible face only; keep source expressions. Hidden or upside-down face stays hidden.`);
+    if(on('body')) L.push(`HAIR AND BODY: hair and build exactly as in ${S('@image'+m.body)}, even upside down and in fast motion.`);
+    if(on('outfit')) L.push(`OUTFIT: ${Q(val('outfit'))}. Same outfit in every frame; nothing else.`);
+  }
+  if(on('loc')){L.push('',H('LOCATION'));L.push(`Replace everything around ${esc(lock)} with ${S('@image'+m.loc)}, matched to the source perspective, horizon and light. Nothing covers the performer, hands or feet.`)}
+  if(on('prod')){L.push('',H('PRODUCT'));const g=MOM.filter(x=>x.gag).map(x=>ts(x.t)).join(', ');L.push(`${S('@image'+m.prod)} replaces ${esc(val('prod'))} in every frame where it is visible in the source, following its exact path${g?` (key moments ${g})`:''}. At the calmest moment at the end it is clearly visible and sharp. Same object, size and colour in every frame.`)}
+  L.push('',H('AUDIO'),`Preserve the original audio of ${S('@video1')} in exact sync. Nothing added.`);
+  L.push('',H('NEGATIVES'));
+  const bug=$('#bug')?$('#bug').value.trim():'';
+  L.push('No altered motion, no retiming, no cuts, no reframing, no stabilisation, no slow motion, no extra or missing people, no duplicated limbs, no morphing face, no trace of the original performer'+(on('outfit')?', no clothing other than specified':'')+(bug?', '+Q(bug):'')+', no text, no logos, no watermarks, no UI elements.');
+  $('#tpl').innerHTML=L.join('\n');
+  const load=[['@video1','видео-основа (кнопка в шаге 1)']];
+  if(on('face'))load.push(['@image'+m.face,'лицо крупно']);
+  if(on('body'))load.push(['@image'+m.body,'в полный рост']);
+  if(on('loc'))load.push(['@image'+m.loc,'фото места']);
+  if(on('prod'))load.push(['@image'+m.prod,'фото товара']);
+  $('#load').innerHTML=load.map(x=>`<div><span class="mono">${x[0]}</span><span>${x[1]}</span></div>`).join('');
+}
+function board(){
+  const f=['стоит у перекладины','прыжок','перегиб','горизонталь','вниз головой','второй оборот','оборот','очки летят','ноги на землю','присед','держится','держится','отпускает','руки к голове','садится','смеётся','очки рядом'];
+  $('#board').innerHTML=f.map((x,i)=>`<div class="fr"><div class="im"><i style="${/оборот|вниз/.test(x)?'transform:rotate(180deg);bottom:36%':''}"></i><span>${(i/2).toFixed(1).replace('.',',')}</span></div><small>${x}</small></div>`).join('');
+}
+async function copy(t){try{await navigator.clipboard.writeText(t);toast('Скопировано')}catch(e){const a=document.createElement('textarea');a.value=t;document.body.appendChild(a);a.select();try{document.execCommand('copy');toast('Скопировано')}catch(_){toast('Не удалось скопировать')}a.remove()}}
+document.addEventListener('click',e=>{
+  const b=e.target.closest('button');if(!b)return;
+  if(b.id==='pick'){$('#drop').hidden=true;$('#base').hidden=false;$('#work').hidden=false;stage=1;steps();return}
+  if(b.dataset.sw){const s=SW[+b.dataset.sw];s.on=!s.on;renderSwaps();build();stage=Math.max(stage,2);steps();return}
+  if(b.dataset.mx){MOM.splice(+b.dataset.mx,1);renderMoments();build();return}
+  if(b.id==='addm'){MOM.push({t:'',v:''});renderMoments();return}
+  if(b.id==='copy'){copy($('#tpl').textContent);return}
+  if(b.dataset.mode){mode=b.dataset.mode;document.querySelectorAll('[data-mode]').forEach(x=>x.className='btn small '+(x===b?'':'ghost'));['m','g'].forEach(p=>{$('#'+p+'-hand').hidden=mode!=='hand';$('#'+p+'-auto').hidden=mode!=='auto'});return}
+  if(b.id==='pack'){toast('Скачан пакет-турник.zip');return}
+  if(b.id==='usecode'){$('#claude').value=$('#tpl').textContent;stage=Math.max(stage,2);steps();toast('Подставлено');return}
+  if(b.id==='ask'){b.disabled=true;$('#askst').textContent='Claude пишет шаблон…';setTimeout(()=>{$('#claude').value=$('#tpl').textContent;$('#askst').textContent='готово · 14 сек';b.disabled=false;stage=Math.max(stage,2);steps()},1100);return}
+  if(b.id==='copyc'){const t=$('#claude').value.trim();if(!t){toast('Сначала шаблон в блоке 3');return}copy(t);return}
+  if(b.id==='gen'){if(!$('#claude').value.trim()){toast('Сначала шаблон в блоке 3');return}b.disabled=true;$('#genst').textContent='Seedance генерирует… ~2 мин';setTimeout(()=>{$('#genst').textContent='готово · 480p проба';$('#vid').hidden=false;b.disabled=false;stage=Math.max(stage,3);steps()},1300);return}
+  if(b.id==='fix'){const t=$('#bug').value.trim();if(!t){toast('Опишите, что не так');return}toast(mode==='auto'?'Claude правит шаблон…':'Баг добавлен в пакет');build();if(mode==='auto')setTimeout(()=>{$('#claude').value=$('#tpl').textContent;toast('Шаблон обновлён')},900);return}
+  if(b.id==='vitr'){stage=4;steps();toast('Тренд на витрине');return}
+  if(b.dataset.mark){mark=b.dataset.mark;document.querySelectorAll('[data-mark]').forEach(x=>x.className='btn small '+(x===b?'':'ghost'));$('#bugbox').hidden=mark==='g';$('#vitr').disabled=mark!=='g';$('#score').textContent='испытание: '+(mark==='g'?1:0)+' из 10';if(mark==='g')toast('Засчитано «Отлично»');return}
+  if(b.dataset.toast){toast(b.dataset.toast);return}
+});
+document.addEventListener('input',e=>{
+  const t=e.target;
+  if(t.dataset.f!==undefined){SW[+t.dataset.f].val=t.value}
+  if(t.dataset.mt!==undefined){MOM[+t.dataset.mt].t=t.value;renderTLonly()}
+  if(t.dataset.mv!==undefined){MOM[+t.dataset.mv].v=t.value}
+  build();
+});
+function renderTLonly(){const dur=8.2;$('#tl').innerHTML=CUTS.map(c=>`<div class="sc" style="left:0;width:${c/dur*100}%"></div>`).join('')+MOM.map(m=>{const t=parseFloat(String(m.t).replace(',','.'));return isNaN(t)?'':`<div class="mk ${m.gag?'gag':''}" style="left:${t/dur*100}%"></div>`}).join('')}
+steps();renderSwaps();renderMoments();board();build();
+</script>

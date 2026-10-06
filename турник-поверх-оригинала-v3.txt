@@ -1,0 +1,70 @@
+ТУРНИК — ШАБЛОН «ПОВЕРХ ОРИГИНАЛА» · версия 3 (волосы, начальная поза)
+SYNTX → Seedance 2.0 · режим с видео-образцом · ОБЯЗАТЕЛЬНО 9:16 (не 16:9!) · длительность 8 с (не 5–6!) · лучше Seedance 2.5
+Перед отправкой: замените [ОДЕЖДА …] на нужную одежду по-английски.
+
+Что загрузить:
+  @video1 — основа-1080x1920-четкая.mp4 (или основа-720x1280.mp4)
+  @image1 — лицо героя крупно (герой-лицо.jpg)
+  @image2 — герой в полный рост (герой-рост.jpg)
+  @image3 — фото локации (если место не меняем — не грузить и удалить блок LOCATION)
+  @image4 — фото товара (очки / кепка / наушники; если без товара — удалить блок PRODUCT)
+
+=====================================================================
+
+CREATIVE MAPPING
+@video1 = base video and authoritative reference for the entire performance: every body movement, rotation, timing, camera position, handheld shake, framing, bar and post geometry, performer scale, frame order, audio and duration.
+@image1 = lead performer's facial identity only. Face and identity only — no background, lighting or pose transfer.
+@image2 = lead performer's body build and hair only. Ignore the clothing in @image2. No background or pose transfer.
+@image3 = environment only: ground, trees, buildings, sky and light. Do not take people or objects from it.
+@image4 = the exact object that replaces the orange sunglasses: shape, proportions, materials, colour. No printed text.
+
+---
+
+ONE-SENTENCE SUMMARY
+Edit the existing @video1 performance in one continuous take: the person from @image1/@image2 replaces the girl, the location from @image3 replaces the background around the unchanged low bar, and the object from @image4 replaces the orange sunglasses — it sits on the performer at the start and flies off at the exact moment the sunglasses fly off in @video1.
+
+---
+
+MOTION LOCK — ABSOLUTE
+Frame 1 of the output equals frame 1 of @video1, pose for pose: standing behind the bar, both hands gripping it, mid-jump into the fold — copy the exact body position of the first source frame.
+No standing intro, no delay, no extra beats at the start or end.
+Preserve every movement of @video1 at its exact source time: the fold over the low bar, both rotations, the horizontal hold, the upside-down hang, the legs swinging over, the landing, the crouch under the bar, the hands going to the head, the sit-down on the grass. Same joint positions, hand grip on the bar, foot contacts, head angles, expressions, speed and momentum. Do not simplify, smooth, slow down or add any movement.
+
+---
+
+CAMERA LOCK
+Preserve the source camera exactly: handheld vertical phone held by a friend, same position, height, angle, shake, jerks, framing, field of view, focus behaviour and motion blur in every frame. Performer occupies the same screen position and size as in the source. No new angles, reframing, zoom, stabilisation, slow motion or speed change. Same smartphone video texture as the source: mild noise, slight compression, natural phone colour — not cleaner, not cinematic.
+
+---
+
+BAR — ABSOLUTE LOCK, EVERY FRAME
+The low metal bar and its painted posts from @video1 stay in every frame with identical geometry: same height (hip level of the performer), same position, same thickness, same spacing of the posts. Hands and body interact with the bar exactly as in the source and never pass through it. The bar may take the colour of the new location; its shape and position never change.
+
+---
+
+PERFORMER
+FACE: apply @image1 identity to the visible face only. Keep the source expressions, mouth movement, laugh and grimace. When the face is upside down, blurred or turned away in the source, it stays that way — do not reveal or redraw it.
+REPLACE COMPLETELY: no trace of the original performer remains — not her long blonde hair, not her body shape, not her skirt or top.
+HAIR: exactly the hair from @image1/@image2 — short, same colour. Never long hair, never blonde, never flowing hair, even upside down and during rotations.
+BODY: apply the build from @image2, fitted over the exact source body pose and silhouette.
+OUTFIT: [ОДЕЖДА — например: fitted grey long-sleeve sports top, black athletic shorts, white sneakers]. Never a suit, jacket, tie or formal shoes unless written here. Same outfit in every frame, moving with the existing motion.
+
+---
+
+LOCATION
+Replace everything around the bar with the environment from @image3, matched to the source camera perspective, horizon line and light direction. Keep the light of the source: soft overcast dusk, no hard shadows. Grass stays under the bar where the performer lands and sits. Nothing in the new environment covers the bar, the performer, the hands or the feet. Light breeze — leaves and grass move naturally.
+
+---
+
+PRODUCT — THE GAG
+The object from @image4 replaces the orange sunglasses in every frame where the sunglasses are visible in @video1: worn by the performer at the start, flying off at the exact source moment, landing on the grass exactly where the sunglasses land. It must visibly leave the face during the rotations and fall to the grass — this is the gag and cannot be skipped. From 00:06.0 to the end it lies clearly visible on the grass in front of the performer, and the performer has nothing on the face. At 00:06.5 the performer grabs the head with both hands and laughs — exactly as in @video1. Same object, same size, same colour in every frame. No logos or text on it.
+
+---
+
+AUDIO
+Preserve the original audio of @video1 unchanged and in exact sync. No added music, effects or voice.
+
+---
+
+NEGATIVES
+No altered motion, no simplified or missing rotation, no changed bar height or position, no high gym bar, no fence, no reframing, no new camera angles, no stabilisation, no slow motion, no cuts, no retiming, no frozen frames, no extra or missing people, no duplicated limbs, no hands passing through the bar, no morphing face, no face drawn when hidden in the source, no product staying on the face after it flies off, no product missing from the grass at the end, no suit or formal clothing unless specified, no standing intro, no long hair, no blonde hair, no trace of the original performer, no clean cinematic render, no text, no logos, no watermarks, no captions, no UI elements.
