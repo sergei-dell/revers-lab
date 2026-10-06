@@ -93,6 +93,9 @@ export function Revers2({ onФайл, onСообщение }: Свойства) 
   const [моменты, setМоменты] = useState<Момент[]>([]);
   const [баги, setБаги] = useState<string[]>([]);
   const кадрыRef = useRef<КадрыДляПакета | null>(null);
+  /*  Смены движения держим и в состоянии: разметку рисуем из него, а
+      не из ссылки — во время отрисовки ссылку читать нельзя.       */
+  const [смены, setСмены] = useState<number[]>([]);
 
   /*  Блок 4: генерация и оценка. Счётчик испытания живёт на сервере —
       он один на все тренды и должен пережить перезагрузку.         */
@@ -205,6 +208,7 @@ export function Revers2({ onФайл, onСообщение }: Свойства) 
     const адрес = `/api/osnova/${разбор.id}/${encodeURIComponent(разбор.запасная.файл)}`;
     const готово = await кадрыДляПакета(адрес, разбор.исходник.длительность);
     кадрыRef.current = готово;
+    setСмены(готово.смены);
     return готово;
   }, [разбор]);
 
@@ -290,7 +294,7 @@ export function Revers2({ onФайл, onСообщение }: Свойства) 
               моменты,
               баги,
               днк: null,
-              смены: кадрыRef.current?.смены ?? [],
+              смены,
               раскадровка: null,
               кадры: [],
               прочти: "",
@@ -298,7 +302,7 @@ export function Revers2({ onФайл, onСообщение }: Свойства) 
             }),
             чтоМеняем: JSON.stringify(чтоМеняем(подмены, фишка), null, 2),
             днк: JSON.stringify(
-              { длительность: разбор.исходник.длительность, смены: кадрыRef.current?.смены ?? [] },
+              { длительность: разбор.исходник.длительность, смены },
               null,
               2,
             ),
@@ -319,7 +323,7 @@ export function Revers2({ onФайл, onСообщение }: Свойства) 
         setClaudeИдёт(false);
       }
     },
-    [разбор, фишка, замок, подмены, моменты, баги, заготовка, взятьКадры, onСообщение],
+    [разбор, фишка, замок, подмены, моменты, баги, смены, заготовка, взятьКадры, onСообщение],
   );
 
   const принятьФайл = useCallback(
@@ -891,6 +895,182 @@ export function Revers2({ onФайл, onСообщение }: Свойства) 
               : "Доступно после «Отлично». Уходит: видео-основа, шаблон, список фото для клиента, пример результата."}
           </p>
         </section>
+      ) : null}
+
+      {/* ---------- свёрнуто: ручная настройка шаблона ---------- */}
+      {разбор ? (
+        <details className="panel overflow-hidden">
+          <summary className="cursor-pointer px-4 py-3 font-display text-[13.5px] font-bold uppercase tracking-[0.07em] text-chalk">
+            Ручная настройка шаблона (без Claude)
+            <span className="ml-2 font-body text-[12px] font-normal normal-case tracking-normal text-dim">
+              замок, моменты, шаблон кодом
+            </span>
+          </summary>
+
+          <div className="grid gap-3 border-t border-line-soft p-4">
+            <label className="grid gap-1.5">
+              <span className="text-[12.5px] text-muted">
+                Что в кадре нельзя менять (форма и место) — по-английски
+              </span>
+              <input
+                value={замок}
+                onChange={(e) => setЗамок(e.target.value)}
+                placeholder="the low metal bar at hip height on blue painted posts"
+                className="w-full rounded-lg border border-edge bg-[#0a0a0f] px-3 py-2 text-[13.5px] text-chalk outline-none focus:border-ember"
+              />
+            </label>
+
+            {/*  Шкала времени: пунктиром — смены движения, которые нашёл
+                 РЕВЕРС, точками — моменты, вписанные руками.         */}
+            <div>
+              <p className="hud-label">Шкала времени</p>
+              <div className="relative mt-1.5 h-12 overflow-hidden rounded-lg border border-line bg-raised">
+                {смены.map((т) => (
+                  <span
+                    key={`смена-${т}`}
+                    title={`смена движения ${т.toFixed(2)} с`}
+                    className="absolute inset-y-0 w-px border-l border-dashed border-ice/70"
+                    style={{ left: `${(т / Math.max(0.1, разбор.исходник.длительность)) * 100}%` }}
+                  />
+                ))}
+                {моменты.map((м, i) => (
+                  <span
+                    key={`момент-${i}`}
+                    title={м.что}
+                    className={`absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full ${
+                      м.фишка ? "bg-flare" : "bg-ember"
+                    }`}
+                    style={{
+                      left: `${(м.время / Math.max(0.1, разбор.исходник.длительность)) * 100}%`,
+                    }}
+                  />
+                ))}
+              </div>
+              <div className="mt-1 flex justify-between font-mono text-[11px] text-dim">
+                <span>0</span>
+                <span>{разбор.исходник.длительность.toFixed(1)} с</span>
+              </div>
+            </div>
+
+            <div>
+              <p className="hud-label">Моменты</p>
+              <div className="mt-1.5 grid gap-1.5">
+                {моменты.map((м, i) => (
+                  <div
+                    key={i}
+                    className={`grid grid-cols-[72px_minmax(0,1fr)_auto_auto] items-center gap-2 rounded-lg border px-2 py-1.5 ${
+                      м.фишка ? "border-flare/45 bg-flare/6" : "border-line bg-raised"
+                    }`}
+                  >
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={м.время}
+                      aria-label="время, сек"
+                      onChange={(e) =>
+                        setМоменты((п) =>
+                          п.map((х, j) =>
+                            j === i ? { ...х, время: Math.max(0, Number(e.target.value) || 0) } : х,
+                          ),
+                        )
+                      }
+                      className="rounded border border-line bg-void px-1.5 py-1 font-mono text-[12.5px] text-chalk outline-none focus:border-ember"
+                    />
+                    <input
+                      value={м.что}
+                      aria-label="что происходит"
+                      placeholder="what happens — по-английски"
+                      onChange={(e) =>
+                        setМоменты((п) => п.map((х, j) => (j === i ? { ...х, что: e.target.value } : х)))
+                      }
+                      className="w-full rounded border border-line bg-void px-2 py-1 text-[13px] text-chalk outline-none focus:border-ember"
+                    />
+                    <button
+                      type="button"
+                      aria-pressed={Boolean(м.фишка)}
+                      title="Это и есть фишка"
+                      onClick={() =>
+                        setМоменты((п) => п.map((х, j) => (j === i ? { ...х, фишка: !х.фишка } : х)))
+                      }
+                      className={`rounded px-2 py-1 text-[12px] ${
+                        м.фишка ? "bg-flare/20 text-flare" : "text-dim hover:text-chalk"
+                      }`}
+                    >
+                      фишка
+                    </button>
+                    <button
+                      type="button"
+                      title="Удалить"
+                      onClick={() => setМоменты((п) => п.filter((_, j) => j !== i))}
+                      className="px-1.5 text-[15px] text-dim hover:text-bad"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => setМоменты((п) => [...п, { время: 0, что: "" }])}
+                >
+                  + Момент
+                </button>
+                {смены.length ? (
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() =>
+                      setМоменты((п) => {
+                        const было = new Set(п.map((м) => м.время.toFixed(2)));
+                        const новые = смены
+                          .filter((т) => !было.has(т.toFixed(2)))
+                          .map((т) => ({ время: т, что: "" }));
+                        return [...п, ...новые].sort((a, b) => a.время - b.время);
+                      })
+                    }
+                  >
+                    Взять смены движения
+                  </button>
+                ) : null}
+              </div>
+            </div>
+
+            <div>
+              <p className="hud-label">Шаблон, собранный кодом</p>
+              <pre className="mt-1.5 max-h-[320px] overflow-auto whitespace-pre-wrap break-words rounded-xl border border-edge bg-[#0a0a0f] p-3 font-mono text-[12px] leading-relaxed text-[#e6e3f0]">
+                {заготовка}
+              </pre>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() =>
+                  void navigator.clipboard
+                    .writeText(заготовка)
+                    .then(() => onСообщение("success", "Скопировано"))
+                    .catch(() => onСообщение("error", "Буфер недоступен — выделите и скопируйте"))
+                }
+              >
+                Копировать
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  setШаблон(заготовка);
+                  onСообщение("success", "Подставлено в блок 3");
+                }}
+              >
+                Подставить в блок 3
+              </button>
+            </div>
+          </div>
+        </details>
       ) : null}
     </div>
   );
