@@ -11,7 +11,14 @@ import {
   type Подмена,
 } from "@/lib/osnova/подмены";
 import { кадрыДляПакета, type КадрыДляПакета } from "@/lib/osnova/кадры";
-import { какуюОснову, имяПакета, собратьПакет, файлФишки } from "@/lib/osnova/пакет";
+import {
+  какуюОснову,
+  имяПакета,
+  имяТренда,
+  собратьПакет,
+  собратьТренд,
+  файлФишки,
+} from "@/lib/osnova/пакет";
 import { собратьШаблон, type Момент } from "@/lib/osnova/шаблон";
 import { downloadBlob } from "@/lib/format";
 import { createChoiceStore, useChoice } from "@/lib/prefs";
@@ -28,8 +35,9 @@ import {
     прежнее (промпт, ДНК, раскадровка, «Для Seedance») никуда не делось
     — оно в свёрнутом блоке внизу.
 
-    Блок 1 — чистая видео-основа, блок 2 — фишка и подмены. Остальные
-    блоки добавляются следующими разделами задания.                   */
+    Пять блоков главного пути: видео-основа, фишка и подмены, шаблон от
+    Claude, генерация с оценкой и витрина. Свёрнутые блоки — ручная
+    настройка шаблона и все прежние инструменты.                      */
 
 type Свойства = {
   /*  Файл отдаётся и наверх, в прежний разбор: один ролик на оба
@@ -94,6 +102,42 @@ export function Revers2({ onФайл, onСообщение }: Свойства) 
     готово: 0,
     всего: 10,
   });
+
+  /*  Блок 5: витрина. Связи с ней пока нет, поэтому тренд уезжает
+      архивом — позже это станет прямой отправкой в админку.        */
+  const [пример, setПример] = useState<File | null>(null);
+  const [трендИдёт, setТрендИдёт] = useState(false);
+  const полеПримера = useRef<HTMLInputElement | null>(null);
+
+  const наВитрину = useCallback(async () => {
+    if (!разбор) return;
+    setТрендИдёт(true);
+    try {
+      const основы: Array<{ имя: string; blob: Blob }> = [];
+      for (const файл of [разбор.большая.файл, разбор.запасная.файл]) {
+        const о = await fetch(`/api/osnova/${разбор.id}/${encodeURIComponent(файл)}`);
+        if (о.ok) основы.push({ имя: файл, blob: await о.blob() });
+      }
+      const архив = await собратьТренд({
+        разбор,
+        фишка,
+        шаблон,
+        подмены,
+        основы,
+        пример: пример ? { имя: `пример-${пример.name}`, blob: пример } : null,
+      });
+      downloadBlob(архив, имяТренда(разбор.имя));
+      onСообщение(
+        "success",
+        "Тренд собран",
+        "Позже этот архив будет уходить в админку витрины сам",
+      );
+    } catch (е) {
+      onСообщение("error", "Тренд не собрался", е instanceof Error ? е.message : undefined);
+    } finally {
+      setТрендИдёт(false);
+    }
+  }, [разбор, фишка, шаблон, подмены, пример, onСообщение]);
 
   /*  Счёт испытания и записанные баги этого тренда — с сервера.    */
   const обновитьИспытание = useCallback(async () => {
@@ -800,6 +844,52 @@ export function Revers2({ onФайл, onСообщение }: Свойства) 
               ) : null}
             </div>
           ) : null}
+        </section>
+      ) : null}
+
+      {/* ---------- 5 · витрина ---------- */}
+      {разбор ? (
+        <section className="panel p-4">
+          <p className="hud-label">5 · Витрина</p>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={оценка !== "отлично" || трендИдёт}
+              onClick={() => void наВитрину()}
+              title={оценка !== "отлично" ? "Доступно после оценки «Отлично»" : undefined}
+            >
+              {трендИдёт ? "Собираем тренд…" : "На витрину"}
+            </button>
+
+            <input
+              ref={полеПримера}
+              type="file"
+              accept="video/*"
+              className="hidden"
+              onChange={(e) => {
+                setПример(e.target.files?.[0] ?? null);
+                e.target.value = "";
+              }}
+            />
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => полеПримера.current?.click()}
+            >
+              {пример ? "Заменить пример результата" : "Приложить пример результата"}
+            </button>
+            {пример ? (
+              <span className="font-mono text-[12px] text-dim">{пример.name}</span>
+            ) : null}
+          </div>
+
+          <p className="mt-2 text-[12.5px] leading-relaxed text-muted">
+            {оценка === "отлично"
+              ? "Уходит архивом: обе видео-основы, итоговый шаблон, список фото для клиента и пример результата. Прямой связи с витриной пока нет — позже эта кнопка будет отправлять тренд в админку сама."
+              : "Доступно после «Отлично». Уходит: видео-основа, шаблон, список фото для клиента, пример результата."}
+          </p>
         </section>
       ) : null}
     </div>
