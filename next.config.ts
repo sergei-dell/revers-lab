@@ -13,6 +13,8 @@ const nextConfig: NextConfig = статическая
       assetPrefix: "/revers-lab",
       images: { unoptimized: true },
     }
-  : {};
+  : {
+      experimental: { proxyClientMaxBodySize: "500mb" },
+    };
 
 export default nextConfig;
