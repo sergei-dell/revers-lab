@@ -3,6 +3,12 @@
 import { useCallback, useRef, useState } from "react";
 
 import type { Проверка, РазборОсновы } from "@/lib/osnova/основа";
+import {
+  ПОДМЕНЫ_ПО_УМОЛЧАНИЮ,
+  номераКартинок,
+  type КлючПодмены,
+  type Подмена,
+} from "@/lib/osnova/подмены";
 
 /*  РЕВЕРС 2 — ГЛАВНЫЙ ПУТЬ.
 
@@ -10,8 +16,8 @@ import type { Проверка, РазборОсновы } from "@/lib/osnova/о
     прежнее (промпт, ДНК, раскадровка, «Для Seedance») никуда не делось
     — оно в свёрнутом блоке внизу.
 
-    Здесь блок 1: чистая видео-основа. Остальные блоки добавляются
-    следующими разделами задания.                                     */
+    Блок 1 — чистая видео-основа, блок 2 — фишка и подмены. Остальные
+    блоки добавляются следующими разделами задания.                   */
 
 type Свойства = {
   /*  Файл отдаётся и наверх, в прежний разбор: один ролик на оба
@@ -30,6 +36,22 @@ export function Revers2({ onФайл, onСообщение }: Свойства) 
   const [правкаРамки, setПравкаРамки] = useState(false);
   const [рамка, setРамка] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const полеФайла = useRef<HTMLInputElement | null>(null);
+
+  /*  Блок 2: фишка и что подменяем. Живёт рядом с основой — дальше по
+      этим же данным собираются шаблон, список загрузки и пакет.     */
+  const [фишка, setФишка] = useState("");
+  const [подмены, setПодмены] = useState<Подмена[]>(ПОДМЕНЫ_ПО_УМОЛЧАНИЮ);
+  const номера = номераКартинок(подмены);
+
+  const переключить = useCallback((ключ: КлючПодмены) => {
+    setПодмены((п) =>
+      п.map((х) => (х.ключ === ключ ? { ...х, включена: !х.включена } : х)),
+    );
+  }, []);
+
+  const вписать = useCallback((ключ: КлючПодмены, текст: string) => {
+    setПодмены((п) => п.map((х) => (х.ключ === ключ ? { ...х, значение: текст } : х)));
+  }, []);
 
   const принятьФайл = useCallback(
     async (файл: File) => {
@@ -239,6 +261,82 @@ export function Revers2({ onФайл, onСообщение }: Свойства) 
           </div>
         ) : null}
       </section>
+
+      {/* ---------- 2 · фишка и что меняем ---------- */}
+      {разбор ? (
+        <section className="panel p-4">
+          <p className="hud-label">2 · Фишка и что меняем</p>
+
+          <label className="mt-3 grid gap-1.5">
+            <span className="text-[12.5px] text-muted">
+              В чём фишка — одной строкой (можно по-русски, Claude переведёт)
+            </span>
+            <input
+              value={фишка}
+              onChange={(e) => setФишка(e.target.value)}
+              placeholder="например: лихо крутится на турнике, очки слетают, в конце держится за голову и смеётся"
+              className="w-full rounded-lg border border-edge bg-[#0a0a0f] px-3 py-2.5 text-[14px] text-chalk outline-none focus:border-ember"
+            />
+          </label>
+
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            {подмены.map((п) => (
+              <div
+                key={п.ключ}
+                className={`grid grid-cols-[38px_minmax(0,1fr)] gap-2.5 rounded-xl border p-3 transition ${
+                  п.включена ? "border-ember/40 bg-ember/6" : "border-line bg-raised"
+                }`}
+              >
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={п.включена}
+                  aria-label={п.имя}
+                  onClick={() => переключить(п.ключ)}
+                  className={`mt-0.5 h-5 w-9 rounded-full border transition ${
+                    п.включена ? "border-ember bg-ember/70" : "border-edge bg-void"
+                  }`}
+                >
+                  <span
+                    className={`block h-3.5 w-3.5 rounded-full bg-chalk transition-transform ${
+                      п.включена ? "translate-x-[18px]" : "translate-x-[3px]"
+                    }`}
+                  />
+                </button>
+
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <b className="text-[13.5px] text-chalk">{п.имя}</b>
+                    {п.включена && п.скартинкой ? (
+                      <span className="rounded-md border border-ember/35 bg-ember/14 px-1.5 py-0.5 font-mono text-[11.5px] text-ember">
+                        @image{номера[п.ключ]}
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="mt-0.5 text-[12px] leading-snug text-muted">{п.пояснение}</p>
+
+                  {п.поле && п.включена ? (
+                    <label className="mt-2 grid gap-1">
+                      <span className="text-[11.5px] text-dim">{п.поле}</span>
+                      <input
+                        value={п.значение ?? ""}
+                        onChange={(e) => вписать(п.ключ, e.target.value)}
+                        className="w-full rounded-lg border border-edge bg-[#0a0a0f] px-2.5 py-1.5 text-[13px] text-chalk outline-none focus:border-ember"
+                      />
+                    </label>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <p className="mt-2.5 text-[12px] leading-relaxed text-dim">
+            Номера @image идут по порядку включённых пунктов с фотографией. Одежда задаётся
+            текстом и номера не получает. Выключите пункт — номера пересчитаются везде: и в
+            списке загрузки, и в шаблоне.
+          </p>
+        </section>
+      ) : null}
     </div>
   );
 }
