@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import path from "node:path";
 
 /*  FFMPEG ВНУТРИ ПРОЕКТА.
 
@@ -6,7 +8,36 @@ import { spawn } from "node:child_process";
     или он будет собран без нужных фильтров. Берём тот, что приехал
     пакетом `ffmpeg-static` — один и тот же на всех машинах.          */
 
-const путьFfmpeg = require("ffmpeg-static") as string | null;
+/*  Где лежит ffmpeg.
+
+    Пакет `ffmpeg-static` отдаёт путь, посчитанный от своего файла. Под
+    сборщиком Next этот файл переезжает, и путь превращается в
+    несуществующий «/ROOT/node_modules/...». Поэтому сначала ищем
+    бинарник рядом с проектом и только потом верим пакету.          */
+function найтиFfmpeg(): string | null {
+  const корень = process.cwd();
+  const имя = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
+  const где = [
+    path.join(корень, "node_modules", "ffmpeg-static", имя),
+    path.join(корень, "..", "node_modules", "ffmpeg-static", имя),
+  ];
+  for (const путь of где) {
+    try {
+      if (existsSync(путь)) return путь;
+    } catch {
+      /* ищем дальше */
+    }
+  }
+  try {
+    const изПакета = require("ffmpeg-static") as string | null;
+    if (изПакета && existsSync(изПакета)) return изПакета;
+  } catch {
+    /* пакет не установлен */
+  }
+  return null;
+}
+
+const путьFfmpeg = найтиFfmpeg();
 
 export function ffmpegЕсть(): boolean {
   return Boolean(путьFfmpeg);
