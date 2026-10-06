@@ -1,14 +1,20 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { Проверка, РазборОсновы } from "@/lib/osnova/основа";
 import {
   ПОДМЕНЫ_ПО_УМОЛЧАНИЮ,
   номераКартинок,
+  чтоМеняем,
   type КлючПодмены,
   type Подмена,
 } from "@/lib/osnova/подмены";
+import { кадрыДляПакета, type КадрыДляПакета } from "@/lib/osnova/кадры";
+import { какуюОснову, имяПакета, собратьПакет, файлФишки } from "@/lib/osnova/пакет";
+import { собратьШаблон, type Момент } from "@/lib/osnova/шаблон";
+import { downloadBlob } from "@/lib/format";
+import { createChoiceStore, useChoice } from "@/lib/prefs";
 
 /*  РЕВЕРС 2 — ГЛАВНЫЙ ПУТЬ.
 
@@ -27,6 +33,14 @@ type Свойства = {
 };
 
 type Состояние = "пусто" | "идёт" | "готово" | "беда";
+
+/*  Режим блока 3 помнится между заходами: пока API не подключён,
+    владелец каждый раз работает вручную — незачем переключать.     */
+const РЕЖИМ_CLAUDE = createChoiceStore<"hand" | "auto">(
+  "revers.claude.mode",
+  ["hand", "auto"],
+  "hand",
+);
 
 export function Revers2({ onФайл, onСообщение }: Свойства) {
   const [состояние, setСостояние] = useState<Состояние>("пусто");
@@ -52,6 +66,160 @@ export function Revers2({ onФайл, onСообщение }: Свойства) 
   const вписать = useCallback((ключ: КлючПодмены, текст: string) => {
     setПодмены((п) => п.map((х) => (х.ключ === ключ ? { ...х, значение: текст } : х)));
   }, []);
+
+  /*  Блок 3: Claude пишет шаблон. Пакет и запрос по API собираются из
+      одних и тех же данных — разницы в содержимом быть не должно.   */
+  const режимClaude = useChoice(РЕЖИМ_CLAUDE);
+  const [шаблон, setШаблон] = useState("");
+  const [пакетИдёт, setПакетИдёт] = useState(false);
+  const [claudeИдёт, setClaudeИдёт] = useState(false);
+  const [claudeСостояние, setClaudeСостояние] = useState("");
+  const [claudeЕсть, setClaudeЕсть] = useState<boolean | null>(null);
+  const [замок, setЗамок] = useState("");
+  const [моменты, setМоменты] = useState<Момент[]>([]);
+  const [баги, setБаги] = useState<string[]>([]);
+  const кадрыRef = useRef<КадрыДляПакета | null>(null);
+
+  /*  Подключён ли Claude — спрашиваем сервер: ключ живёт только там. */
+  useEffect(() => {
+    let живы = true;
+    fetch("/api/claude")
+      .then((о) => о.json())
+      .then((д: { подключён?: boolean }) => {
+        if (живы) setClaudeЕсть(Boolean(д.подключён));
+      })
+      .catch(() => {
+        if (живы) setClaudeЕсть(false);
+      });
+    return () => {
+      живы = false;
+    };
+  }, []);
+
+  /*  Кадры для пакета снимаем один раз на основу и держим: это
+      десятки секунд работы, повторять их на каждую кнопку незачем. */
+  const взятьКадры = useCallback(async (): Promise<КадрыДляПакета | null> => {
+    if (!разбор) return null;
+    if (кадрыRef.current) return кадрыRef.current;
+    const адрес = `/api/osnova/${разбор.id}/${encodeURIComponent(разбор.запасная.файл)}`;
+    const готово = await кадрыДляПакета(адрес, разбор.исходник.длительность);
+    кадрыRef.current = готово;
+    return готово;
+  }, [разбор]);
+
+  const заготовка = разбор
+    ? собратьШаблон({ фишка, замок, моменты, подмены, баги })
+    : "";
+
+  const скачатьПакет = useCallback(async () => {
+    if (!разбор) return;
+    setПакетИдёт(true);
+    try {
+      const кадры = await взятьКадры();
+      const какая = какуюОснову(разбор);
+      const видеоОтвет = await fetch(
+        `/api/osnova/${разбор.id}/${encodeURIComponent(какая.файл)}`,
+      );
+      const видео = видеоОтвет.ok ? await видеоОтвет.blob() : null;
+      const прочти = await fetch("/ПРОЧТИ-claude.md")
+        .then((о) => (о.ok ? о.text() : ""))
+        .catch(() => "");
+
+      const архив = await собратьПакет({
+        разбор,
+        фишка,
+        замок,
+        подмены,
+        моменты,
+        баги,
+        днк: null,
+        смены: кадры?.смены ?? [],
+        раскадровка: кадры?.раскадровка ?? null,
+        кадры: (кадры?.ключевые ?? []).map((к) => ({ имя: к.имя, время: к.время, blob: к.blob })),
+        прочти,
+        видео: видео ? { имя: какая.файл, blob: видео } : null,
+      });
+      downloadBlob(архив, имяПакета(разбор.имя));
+      onСообщение(
+        "success",
+        "Пакет собран",
+        какая.запасная ? "Основа взята запасная — большая не влезает в чат" : undefined,
+      );
+    } catch (е) {
+      onСообщение("error", "Пакет не собрался", е instanceof Error ? е.message : undefined);
+    } finally {
+      setПакетИдёт(false);
+    }
+  }, [разбор, фишка, замок, подмены, моменты, баги, взятьКадры, onСообщение]);
+
+  const спроситьClaude = useCallback(
+    async (правка?: { шаблон: string; баг: string }) => {
+      if (!разбор) return;
+      setClaudeИдёт(true);
+      setClaudeСостояние(правка ? "Claude правит шаблон…" : "Claude пишет шаблон…");
+      try {
+        const кадры = правка ? null : await взятьКадры();
+        const вBase64 = async (blob: Blob) => {
+          const буфер = new Uint8Array(await blob.arrayBuffer());
+          let строка = "";
+          for (let i = 0; i < буфер.length; i += 1) строка += String.fromCharCode(буфер[i]);
+          return btoa(строка);
+        };
+        const картинки: Array<{ имя: string; тип: string; данные: string }> = [];
+        if (кадры) {
+          картинки.push({
+            имя: "раскадровка.jpg",
+            тип: "image/jpeg",
+            данные: await вBase64(кадры.раскадровка),
+          });
+          for (const к of кадры.ключевые.slice(0, 8)) {
+            картинки.push({ имя: к.имя, тип: "image/jpeg", данные: await вBase64(к.blob) });
+          }
+        }
+
+        const ответ = await fetch("/api/claude", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            фишка: файлФишки({
+              разбор,
+              фишка,
+              замок,
+              подмены,
+              моменты,
+              баги,
+              днк: null,
+              смены: кадрыRef.current?.смены ?? [],
+              раскадровка: null,
+              кадры: [],
+              прочти: "",
+              видео: null,
+            }),
+            чтоМеняем: JSON.stringify(чтоМеняем(подмены, фишка), null, 2),
+            днк: JSON.stringify(
+              { длительность: разбор.исходник.длительность, смены: кадрыRef.current?.смены ?? [] },
+              null,
+              2,
+            ),
+            заготовка,
+            картинки,
+            правка,
+          }),
+        });
+        const данные = (await ответ.json()) as { шаблон?: string; error?: string };
+        if (!ответ.ok || !данные.шаблон) throw new Error(данные.error ?? `Сервер ответил ${ответ.status}`);
+        setШаблон(данные.шаблон);
+        setClaudeСостояние("готово");
+        onСообщение("success", правка ? "Шаблон обновлён" : "Шаблон получен");
+      } catch (е) {
+        setClaudeСостояние("");
+        onСообщение("error", "Claude не ответил", е instanceof Error ? е.message : undefined);
+      } finally {
+        setClaudeИдёт(false);
+      }
+    },
+    [разбор, фишка, замок, подмены, моменты, баги, заготовка, взятьКадры, onСообщение],
+  );
 
   const принятьФайл = useCallback(
     async (файл: File) => {
@@ -335,6 +503,100 @@ export function Revers2({ onФайл, onСообщение }: Свойства) 
             текстом и номера не получает. Выключите пункт — номера пересчитаются везде: и в
             списке загрузки, и в шаблоне.
           </p>
+        </section>
+      ) : null}
+
+      {/* ---------- 3 · Claude пишет шаблон ---------- */}
+      {разбор ? (
+        <section className="panel border-ice/40 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="hud-label">3 · Claude пишет шаблон</p>
+            <div className="inline-flex gap-0.5 rounded-xl border border-line bg-[#0a0a0f] p-0.5">
+              {(
+                [
+                  ["hand", "Сейчас: вручную"],
+                  ["auto", "Потом: автоматически"],
+                ] as const
+              ).map(([ключ, имя]) => (
+                <button
+                  key={ключ}
+                  type="button"
+                  aria-pressed={режимClaude === ключ}
+                  onClick={() => РЕЖИМ_CLAUDE.save(ключ)}
+                  className={`rounded-lg px-2.5 py-1.5 text-[13px] ${
+                    режимClaude === ключ ? "bg-raised text-chalk" : "text-muted hover:text-chalk"
+                  }`}
+                >
+                  {имя}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {режимClaude === "hand" ? (
+            <div className="mt-3 grid gap-2.5">
+              <ol className="grid gap-1.5 text-[13px] text-muted">
+                {[
+                  "Скачайте пакет: видео-основа, раскадровка, кадры, ДНК, фишка и задача для Claude",
+                  "Отправьте архив Claude в чат",
+                  "Вставьте ответ Claude в поле ниже",
+                ].map((шаг, i) => (
+                  <li key={шаг} className="grid grid-cols-[22px_minmax(0,1fr)] gap-2">
+                    <span className="font-mono text-dim">{i + 1}</span>
+                    <span>{шаг}</span>
+                  </li>
+                ))}
+              </ol>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => void скачатьПакет()}
+                  disabled={пакетИдёт}
+                >
+                  {пакетИдёт ? "Собираем пакет…" : "Скачать пакет для Claude"}
+                </button>
+                {пакетИдёт ? (
+                  <span className="text-[12.5px] text-muted">
+                    снимаем раскадровку и кадры — это занимает с полминуты
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          ) : (
+            <div className="mt-3 grid gap-2.5">
+              <p className="text-[13px] leading-relaxed text-muted">
+                Сайт сам отправляет пакет в Claude и получает шаблон. Ключ API живёт на
+                сервере, в настройках.
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => void спроситьClaude()}
+                  disabled={claudeИдёт || claudeЕсть === false}
+                  title={claudeЕсть === false ? "Claude не подключён — работайте вручную" : undefined}
+                >
+                  {claudeИдёт ? "Claude пишет…" : "Отправить Claude"}
+                </button>
+                <span className="text-[12.5px] text-dim">
+                  {claudeЕсть === false
+                    ? "Claude не подключён — работайте вручную"
+                    : claudeСостояние}
+                </span>
+              </div>
+            </div>
+          )}
+
+          <label className="mt-3 grid gap-1.5">
+            <span className="text-[12.5px] text-muted">Шаблон от Claude</span>
+            <textarea
+              value={шаблон}
+              onChange={(e) => setШаблон(e.target.value)}
+              placeholder="Сюда вставляется (или приходит сам) шаблон «поверх оригинала»"
+              className="min-h-[180px] w-full rounded-xl border border-edge bg-[#0a0a0f] p-3 font-mono text-[12px] leading-relaxed text-[#e6e3f0] outline-none focus:border-ember"
+            />
+          </label>
         </section>
       ) : null}
     </div>

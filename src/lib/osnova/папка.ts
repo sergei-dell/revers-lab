@@ -7,7 +7,7 @@ import path from "node:path";
     не нужна. Всё, что должно пережить перезапуск сервера, лежит
     обычными файлами рядом с проектом: видео-основы и один json.     */
 
-const КОРЕНЬ = path.join(process.cwd(), ".данные");
+const КОРЕНЬ = path.join(/*turbopackIgnore: true*/ process.cwd(), ".данные");
 
 export function папкаОснов(): string {
   return path.join(КОРЕНЬ, "основы");
