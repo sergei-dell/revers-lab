@@ -15,6 +15,12 @@ import { какуюОснову, имяПакета, собратьПакет, �
 import { собратьШаблон, type Момент } from "@/lib/osnova/шаблон";
 import { downloadBlob } from "@/lib/format";
 import { createChoiceStore, useChoice } from "@/lib/prefs";
+import { порядокЗагрузки } from "@/lib/osnova/подмены";
+import {
+  ПОЧЕМУ_НЕ_ПОДКЛЮЧЁН,
+  генераторПодключён,
+  подсказкаНастроек,
+} from "@/lib/osnova/seedance";
 
 /*  РЕВЕРС 2 — ГЛАВНЫЙ ПУТЬ.
 
@@ -79,6 +85,57 @@ export function Revers2({ onФайл, onСообщение }: Свойства) 
   const [моменты, setМоменты] = useState<Момент[]>([]);
   const [баги, setБаги] = useState<string[]>([]);
   const кадрыRef = useRef<КадрыДляПакета | null>(null);
+
+  /*  Блок 4: генерация и оценка. Счётчик испытания живёт на сервере —
+      он один на все тренды и должен пережить перезагрузку.         */
+  const [оценка, setОценка] = useState<"отлично" | "средне" | "плохо" | null>(null);
+  const [чтоНеТак, setЧтоНеТак] = useState("");
+  const [испытание, setИспытание] = useState<{ готово: number; всего: number }>({
+    готово: 0,
+    всего: 10,
+  });
+
+  /*  Счёт испытания и записанные баги этого тренда — с сервера.    */
+  const обновитьИспытание = useCallback(async () => {
+    if (!разбор) return;
+    try {
+      const ответ = await fetch(`/api/ispytanie?id=${encodeURIComponent(разбор.id)}`);
+      const д = (await ответ.json()) as { готово?: number; всего?: number; баги?: string[] };
+      setИспытание({ готово: д.готово ?? 0, всего: д.всего ?? 10 });
+      setБаги(д.баги ?? []);
+    } catch {
+      /* счётчик не критичен — экран работает и без него */
+    }
+  }, [разбор]);
+
+  /*  Запрос за счётчиком начинаем не сразу: правило о состоянии в
+      эффектах не отличает мгновенную запись от записи после ответа
+      сервера, а лишний повторный показ нам ни к чему.              */
+  useEffect(() => {
+    const метка = window.setTimeout(() => void обновитьИспытание(), 0);
+    return () => window.clearTimeout(метка);
+  }, [обновитьИспытание]);
+
+  const поставитьОценку = useCallback(
+    async (новая: "отлично" | "средне" | "плохо", баг?: string) => {
+      if (!разбор) return;
+      setОценка(новая);
+      try {
+        const ответ = await fetch("/api/ispytanie", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: разбор.id, имя: разбор.имя, оценка: новая, баг }),
+        });
+        const д = (await ответ.json()) as { готово?: number; всего?: number; баги?: string[] };
+        setИспытание({ готово: д.готово ?? 0, всего: д.всего ?? 10 });
+        setБаги(д.баги ?? []);
+        if (новая === "отлично") onСообщение("success", "Засчитано «Отлично»");
+      } catch (е) {
+        onСообщение("error", "Оценка не записалась", е instanceof Error ? е.message : undefined);
+      }
+    },
+    [разбор, onСообщение],
+  );
 
   /*  Подключён ли Claude — спрашиваем сервер: ключ живёт только там. */
   useEffect(() => {
@@ -597,6 +654,152 @@ export function Revers2({ onФайл, onСообщение }: Свойства) 
               className="min-h-[180px] w-full rounded-xl border border-edge bg-[#0a0a0f] p-3 font-mono text-[12px] leading-relaxed text-[#e6e3f0] outline-none focus:border-ember"
             />
           </label>
+        </section>
+      ) : null}
+
+      {/* ---------- 4 · генерация и оценка ---------- */}
+      {разбор ? (
+        <section className="panel p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="hud-label">4 · Генерация</p>
+            <span className="rounded-full bg-ice/12 px-2.5 py-1 font-mono text-[12px] text-ice">
+              {подсказкаНастроек({
+                формат: разбор.вертикальный ? "9:16" : "16:9",
+                секунды: разбор.исходник.длительность,
+                модель: "Seedance 2.5",
+              })}
+            </span>
+          </div>
+
+          {режимClaude === "hand" ? (
+            <div className="mt-3 grid gap-2.5">
+              <p className="text-[12.5px] text-dim">
+                Загрузите в SYNTX в таком порядке и вставьте шаблон:
+              </p>
+              <div className="grid gap-1.5">
+                {порядокЗагрузки(подмены).map((с) => (
+                  <div
+                    key={с.метка}
+                    className="grid grid-cols-[86px_minmax(0,1fr)] gap-2 rounded-lg border border-line bg-raised px-2.5 py-1.5 text-[13px]"
+                  >
+                    <span className="font-mono text-ember">{с.метка}</span>
+                    <span className="text-chalk">{с.что}</span>
+                  </div>
+                ))}
+              </div>
+              <div>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => {
+                    const т = шаблон.trim();
+                    if (!т) {
+                      onСообщение("info", "Сначала шаблон в блоке 3");
+                      return;
+                    }
+                    void navigator.clipboard
+                      .writeText(т)
+                      .then(() => onСообщение("success", "Шаблон скопирован"))
+                      .catch(() => onСообщение("error", "Буфер недоступен — выделите и скопируйте"));
+                  }}
+                >
+                  Копировать шаблон
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="btn btn-primary cursor-not-allowed opacity-45"
+                disabled
+                title={ПОЧЕМУ_НЕ_ПОДКЛЮЧЁН}
+              >
+                Отправить в Seedance · пробно
+              </button>
+              <span className="text-[12.5px] text-dim">
+                {генераторПодключён() ? "" : ПОЧЕМУ_НЕ_ПОДКЛЮЧЁН}
+              </span>
+            </div>
+          )}
+
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+            <span className="hud-label">Оценка результата</span>
+            <span className="font-mono text-[12.5px] text-dim">
+              испытание: {испытание.готово} из {испытание.всего}
+            </span>
+          </div>
+
+          <div className="mt-2 flex flex-wrap gap-2">
+            {(
+              [
+                ["отлично", "Отлично"],
+                ["средне", "Средне — доработать"],
+                ["плохо", "Плохо"],
+              ] as const
+            ).map(([ключ, имя]) => (
+              <button
+                key={ключ}
+                type="button"
+                aria-pressed={оценка === ключ}
+                onClick={() => void поставитьОценку(ключ)}
+                className={`btn ${оценка === ключ ? "btn-primary" : "btn-ghost"}`}
+              >
+                {имя}
+              </button>
+            ))}
+          </div>
+
+          {оценка === "средне" || оценка === "плохо" ? (
+            <div className="mt-3 grid gap-2 rounded-xl border border-line bg-raised p-3">
+              <label className="grid gap-1.5">
+                <span className="text-[12.5px] text-muted">Что не так</span>
+                <input
+                  value={чтоНеТак}
+                  onChange={(e) => setЧтоНеТак(e.target.value)}
+                  placeholder="например: длинные волосы, стоит в начале, 16:9"
+                  className="w-full rounded-lg border border-edge bg-[#0a0a0f] px-2.5 py-2 text-[13.5px] text-chalk outline-none focus:border-ember"
+                />
+              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={claudeИдёт}
+                  onClick={() => {
+                    const баг = чтоНеТак.trim();
+                    if (!баг) {
+                      onСообщение("info", "Опишите, что не так");
+                      return;
+                    }
+                    void поставитьОценку(оценка, баг).then(() => {
+                      setЧтоНеТак("");
+                      if (режимClaude === "auto" && claudeЕсть) {
+                        void спроситьClaude({ шаблон, баг });
+                      } else {
+                        onСообщение(
+                          "success",
+                          "Баг записан",
+                          "Он попадёт в фишка.txt следующего пакета",
+                        );
+                      }
+                    });
+                  }}
+                >
+                  Отправить Claude на доработку
+                </button>
+                <span className="text-[12px] text-dim">
+                  вручную — баг попадёт в пакет; автоматически — Claude сам поправит шаблон
+                </span>
+              </div>
+
+              {баги.length ? (
+                <div className="text-[12.5px] text-muted">
+                  Записано по этому тренду: {баги.map((б) => `«${б}»`).join(", ")}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </section>
       ) : null}
     </div>
