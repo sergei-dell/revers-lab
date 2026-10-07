@@ -679,13 +679,20 @@ export function Revers2({ onФайл, onСообщение }: Свойства) 
                   type="button"
                   className="btn btn-primary"
                   onClick={() => void скачатьПакет()}
-                  disabled={пакетИдёт}
+                  disabled={пакетИдёт || !фишка.trim()}
+                  title={!фишка.trim() ? "Сначала впишите фишку в блоке 2" : undefined}
                 >
                   {пакетИдёт ? "Собираем пакет…" : "Скачать пакет для Claude"}
                 </button>
                 {пакетИдёт ? (
                   <span className="text-[12.5px] text-muted">
                     снимаем раскадровку и кадры — это занимает с полминуты
+                  </span>
+                ) : !фишка.trim() ? (
+                  /*  Без фишки пакет бессмыслен: Claude по нему напишет
+                      шаблон «ни о чём». Лучше не дать нажать.        */
+                  <span className="text-[12.5px] text-flare">
+                    Сначала впишите фишку в блоке 2
                   </span>
                 ) : null}
               </div>
@@ -701,15 +708,23 @@ export function Revers2({ onФайл, onСообщение }: Свойства) 
                   type="button"
                   className="btn btn-primary"
                   onClick={() => void спроситьClaude()}
-                  disabled={claudeИдёт || claudeЕсть === false}
-                  title={claudeЕсть === false ? "Claude не подключён — работайте вручную" : undefined}
+                  disabled={claudeИдёт || claudeЕсть === false || !фишка.trim()}
+                  title={
+                    claudeЕсть === false
+                      ? "Claude не подключён — работайте вручную"
+                      : !фишка.trim()
+                        ? "Сначала впишите фишку в блоке 2"
+                        : undefined
+                  }
                 >
                   {claudeИдёт ? "Claude пишет…" : "Отправить Claude"}
                 </button>
                 <span className="text-[12.5px] text-dim">
                   {claudeЕсть === false
                     ? "Claude не подключён — работайте вручную"
-                    : claudeСостояние}
+                    : !фишка.trim()
+                      ? "Сначала впишите фишку в блоке 2"
+                      : claudeСостояние}
                 </span>
               </div>
             </div>
