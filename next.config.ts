@@ -1,20 +1,16 @@
 import type { NextConfig } from "next";
 
-// Две сборки из одного кода:
-//   обычная            — с сервером, базой и AI-описанием;
-//   NEXT_PUBLIC_STATIC=1 — статическая, для GitHub Pages
-//                        (https://sergei-dell.github.io/revers-lab/).
-const статическая = process.env.NEXT_PUBLIC_STATIC === "1";
-
-const nextConfig: NextConfig = статическая
-  ? {
-      output: "export",
-      basePath: "/revers-lab",
-      assetPrefix: "/revers-lab",
-      images: { unoptimized: true },
-    }
-  : {
-      experimental: { proxyClientMaxBodySize: "500mb" },
-    };
+/*  Настроек почти не осталось: сайт один, собирается обычным образом.
+    Прежняя статическая сборка для GitHub Pages убрана вместе с тем,
+    ради чего она была — разбором ролика в браузере.                */
+const nextConfig: NextConfig = {
+  experimental: {
+    serverActions: {
+      /*  Ролик-тренд приходит целым файлом: предел по умолчанию в
+          1 МБ режет его на подходе.                               */
+      bodySizeLimit: "500mb",
+    },
+  },
+};
 
 export default nextConfig;

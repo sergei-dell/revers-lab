@@ -8,7 +8,7 @@ import { ИМЯ_БИЛЕТА, пароль, подписьБилета, совп
     Если пароль на сервере не задан вовсе, сайт закрыт для всех — иначе
     забытая переменная молча открыла бы его посторонним.            */
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const путь = request.nextUrl.pathname;
   const свои = путь === "/vhod" || путь.startsWith("/api/vhod");
   if (свои) return NextResponse.next();

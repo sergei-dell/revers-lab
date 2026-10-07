@@ -1,6 +1,3 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
-
 /*  CLAUDE ПИШЕТ ШАБЛОН — РЕЖИМ «ПОТОМ: АВТОМАТИЧЕСКИ».
 
     Тот же пакет, что владелец носит в чат руками, сервер отправляет по
@@ -65,7 +62,7 @@ export async function POST(request: Request) {
   const тело = (await request.json().catch(() => null)) as Тело | null;
   if (!тело) return Response.json({ error: "Пустой запрос" }, { status: 400 });
 
-  const задача = await прочти();
+  const задача = await прочти(request);
   const куски: string[] = [];
 
   if (тело.правка) {
@@ -140,22 +137,16 @@ export async function POST(request: Request) {
   }
 }
 
-/*  Задача для Claude лежит рядом с проектом и кладётся в пакет как
-    есть — тот же текст идёт системным сообщением.                  */
-async function прочти(): Promise<string> {
-  /*  Сборщику отдельно говорим не тащить весь проект следом за этим
-      чтением: путь складывается во время работы, и без подсказки он
-      считает зависимостью всю папку.                               */
-  const корень = process.cwd();
-  for (const где of [
-    path.join(корень, "public", "ПРОЧТИ-claude.md"),
-    path.join(корень, "ПРОЧТИ-claude.md"),
-  ]) {
-    try {
-      return await readFile(/*turbopackIgnore: true*/ где, "utf8");
-    } catch {
-      /* ищем дальше */
-    }
+/*  Задача для Claude лежит в `public` и тем же файлом кладётся в
+    пакет. Берём её по своему же адресу, а не с диска: один файл,
+    одна копия, и сборщику не приходится тащить следом весь проект. */
+async function прочти(request: Request): Promise<string> {
+  try {
+    const адрес = new URL("/ПРОЧТИ-claude.md", request.url);
+    const ответ = await fetch(адрес, { cache: "no-store" });
+    if (ответ.ok) return await ответ.text();
+  } catch {
+    /* не вышло — ниже короткая замена */
   }
   return "Напиши один шаблон-промпт для Seedance по приложенному разбору.";
 }
