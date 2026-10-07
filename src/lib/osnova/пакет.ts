@@ -7,6 +7,7 @@ import {
   type Подмена,
 } from "@/lib/osnova/подмены";
 import { времяМетки, собратьШаблон, type Момент } from "@/lib/osnova/шаблон";
+import { архивСРусскимиИменами } from "@/lib/osnova/zip-имена";
 
 /*  ПАКЕТ ДЛЯ CLAUDE.
 
@@ -139,7 +140,7 @@ export async function собратьТренд(состав: СоставТре�
 
   if (состав.пример) zip.file(состав.пример.имя, состав.пример.blob);
 
-  return zip.generateAsync({ type: "blob" });
+  return архивСРусскимиИменами(await zip.generateAsync({ type: "blob" }));
 }
 
 export function имяПакета(имяРолика: string): string {
@@ -191,5 +192,5 @@ export async function собратьПакет(состав: СоставПак�
   );
   zip.file("ПРОЧТИ-claude.md", состав.прочти);
 
-  return zip.generateAsync({ type: "blob" });
+  return архивСРусскимиИменами(await zip.generateAsync({ type: "blob" }));
 }
