@@ -5,6 +5,9 @@ import type { NextConfig } from "next";
     ради чего она была — разбором ролика в браузере.                */
 const nextConfig: NextConfig = {
   experimental: {
+    /*  Замок (proxy.ts) по умолчанию пропускает только 10 МБ тела запроса —
+        большой ролик доходил до /api/osnova обрезанным.                */
+    proxyClientMaxBodySize: "500mb",
     serverActions: {
       /*  Ролик-тренд приходит целым файлом: предел по умолчанию в
           1 МБ режет его на подходе.                               */
