@@ -46,13 +46,16 @@ export function ffmpegЕсть(): boolean {
 export type ЗапускИтог = {
   код: number;
   вывод: string;
+  /*  Времена кадров из showinfo. Собираются на лету: весь вывод мы не
+      храним, и у длинного ролика ранние строки иначе теряются.      */
+  времена: number[];
 };
 
 /*  Запуск ffmpeg. Весь разговор ffmpeg ведёт в stderr — и ошибки, и
     сведения о файле, поэтому собираем именно его.                   */
 export function запуститьFfmpeg(
   доводы: string[],
-  опции: { срокМс?: number; наВыход?: (кусок: Buffer) => void } = {},
+  опции: { срокМс?: number; наВыход?: (кусок: Buffer) => void; времена?: boolean } = {},
 ): Promise<ЗапускИтог> {
   if (!путьFfmpeg) {
     return Promise.reject(new Error("ffmpeg не найден — переустановите зависимости проекта"));
@@ -62,6 +65,10 @@ export function запуститьFfmpeg(
     const процесс = spawn(путьFfmpeg, доводы, { stdio: ["ignore", "pipe", "pipe"] });
     let вывод = "";
     let закрыт = false;
+    const времена: number[] = [];
+    /*  Строка с временем может разорваться между кусками — держим
+        хвост до следующего куска.                                  */
+    let хвост = "";
 
     const часы = setTimeout(() => {
       закрыт = true;
@@ -71,9 +78,18 @@ export function запуститьFfmpeg(
 
     процесс.stdout.on("data", (кусок: Buffer) => опции.наВыход?.(кусок));
     процесс.stderr.on("data", (кусок: Buffer) => {
+      const текст = кусок.toString();
+      if (опции.времена) {
+        const весь = хвост + текст;
+        for (const м of весь.matchAll(/pts_time:([\d.]+)/g)) {
+          const т = Number(м[1]);
+          if (Number.isFinite(т)) времена.push(Number(т.toFixed(2)));
+        }
+        хвост = весь.slice(-40);
+      }
       /*  Вывод бывает длинным; держим только хвост — он нужен лишь
           для разбора сведений и для текста ошибки.                 */
-      вывод = (вывод + кусок.toString()).slice(-20_000);
+      вывод = (вывод + текст).slice(-20_000);
     });
     процесс.on("error", (е) => {
       if (закрыт) return;
@@ -83,7 +99,7 @@ export function запуститьFfmpeg(
     процесс.on("close", (код) => {
       if (закрыт) return;
       clearTimeout(часы);
-      готово({ код: код ?? -1, вывод });
+      готово({ код: код ?? -1, вывод, времена });
     });
   });
 }
@@ -377,28 +393,31 @@ export async function снятьРяд(
   папка: string,
   образец: string,
   ширина: number,
-): Promise<number> {
-  const { код, вывод } = await запуститьFfmpeg(
+): Promise<number[]> {
+  const { код, вывод, времена } = await запуститьFfmpeg(
     [
       "-hide_banner",
       "-y",
       "-i",
       файл,
       "-vf",
-      `fps=${(1 / шаг).toFixed(6)},scale=${ширина}:-2:flags=lanczos`,
+      /*  Отбираем кадры по времени, а не фильтром fps: тот берёт кадр
+          из середины интервала и переставляет метку на начало — кадр
+          с подписью «0,0 с» приходил из 0,2 с. select сохраняет и
+          кадр, и его настоящее время, которое печатает showinfo.   */
+      `select='isnan(prev_selected_t)+gte(t-prev_selected_t,${шаг})',scale=${ширина}:-2:flags=lanczos,showinfo`,
+      "-fps_mode",
+      "passthrough",
       "-q:v",
       "4",
       `${папка}/${образец}`,
     ],
-    { срокМс: 180_000 },
+    { срокМс: 180_000, времена: true },
   );
   if (код !== 0) {
     throw new Error(`Не удалось снять раскадровку: ${вывод.split("\n").slice(-2).join(" ")}`);
   }
-  const сколько = /frame=\s*(\d+)/g;
-  let последнее = 0;
-  for (const м of вывод.matchAll(сколько)) последнее = Number(м[1]);
-  return последнее;
+  return времена;
 }
 
 /*  ГДЕ СКЛЕЙКИ. Встроенный признак смены сцены у ffmpeg: он сравнивает
@@ -406,7 +425,7 @@ export async function снятьРяд(
     в отличие от прежнего разбора в браузере, который на настоящем
     ролике не нашёл ни одной склейки.                               */
 export async function найтиСклейки(файл: string, порог = 0.3): Promise<number[]> {
-  const { код, вывод } = await запуститьFfmpeg(
+  const { код, времена } = await запуститьFfmpeg(
     [
       "-hide_banner",
       "-i",
@@ -417,13 +436,11 @@ export async function найтиСклейки(файл: string, порог = 0.
       "null",
       "-",
     ],
-    { срокМс: 180_000 },
+    { срокМс: 180_000, времена: true },
   );
   if (код !== 0) return [];
   const точки: number[] = [];
-  for (const м of вывод.matchAll(/pts_time:([\d.]+)/g)) {
-    const т = Number(м[1]);
-    if (!Number.isFinite(т)) continue;
+  for (const т of времена) {
     /*  Две склейки подряд в пределах трети секунды — одна склейка. */
     if (точки.length && т - точки[точки.length - 1] < 0.35) continue;
     точки.push(Number(т.toFixed(3)));

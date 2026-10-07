@@ -52,11 +52,13 @@ export async function POST(request: Request) {
     await mkdir(листПапка, { recursive: true });
     await mkdir(ключПапка, { recursive: true });
 
-    await снятьРяд(основа, ШАГ, листПапка, "k-%04d.jpg", ШИРИНА_ЛИСТА);
+    const временаЛиста = await снятьРяд(основа, ШАГ, листПапка, "k-%04d.jpg", ШИРИНА_ЛИСТА);
     const листФайлы = (await readdir(листПапка)).filter((и) => и.endsWith(".jpg")).sort();
     const раскадровка = листФайлы.map((имя, i) => ({
       файл: `${ПАПКА_ЛИСТА}/${имя}`,
-      время: Number((i * ШАГ).toFixed(2)),
+      /*  Время берём у самого ffmpeg: «номер × шаг» расходится с
+          картинкой на доли секунды.                              */
+      время: временаЛиста[i] ?? Number((i * ШАГ).toFixed(2)),
     }));
 
     /*  Склейки ищем двумя способами сразу: встроенный признак ffmpeg
