@@ -3,9 +3,9 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "РЕВЕРС — видео → промпт → кадры",
+  title: "РЕВЕРС — поверх оригинала",
   description:
-    "Лаборатория обратной генерации: загрузите видео, получите детальный промпт для генеративных моделей и разберите ролик на покадровые изображения.",
+    "Трендовый ролик становится видео-основой для Seedance: обрезка интерфейса, чистая основа, шаблон и готовый тренд для витрины.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
